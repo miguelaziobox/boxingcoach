@@ -356,6 +356,8 @@ let currentCombo = null;
 let audioCtx = null;
 let countdownInterval = null;
 let isCountingDown = false;
+let currentExAudio = null;
+let isSpeaking = false;
 
 /* ── AUDIO ── */
 const PUNCH_SOUNDS = {
@@ -379,52 +381,68 @@ function playPunch(key) {
   }
 }
 
+function stopCurrentAudio() {
+  if (currentExAudio) {
+    currentExAudio.pause();
+    currentExAudio.currentTime = 0;
+    currentExAudio = null;
+  }
+  if (isSpeaking) {
+    window.speechSynthesis.cancel();
+    isSpeaking = false;
+  }
+}
+
 function playExerciseSound(name) {
-  if (name === 'Rest' || name === 'Rest between rounds') return;
+  if (name === 'Rest' || name === 'Rest between rounds') return Promise.resolve();
   
-  // Try exact match first
+  stopCurrentAudio();
+
   const tryPlay = (filename) => {
     return new Promise((resolve, reject) => {
       const s = new Audio(`audio/${filename}.mp3`);
-      s.play().then(resolve).catch(reject);
+      currentExAudio = s;
+      s.onended = () => { currentExAudio = null; resolve(); };
+      s.onerror = (e) => { currentExAudio = null; reject(e); };
+      s.play().catch(reject);
     });
   };
 
-  // List of attempts: Exact, Lowercase, Cleaned en-dashes, Generic keyword
   const attempts = [
     name,
     name.toLowerCase(),
     name.replace(/–/g, '-'),
     name.toLowerCase().replace(/–/g, '-'),
-    name.replace(/\s+/g, ' '), // Normalize spaces
+    name.replace(/\s+/g, ' '),
     name.toLowerCase().replace(/\s+/g, ' ')
   ];
 
-  // If it contains a generic category, try that as fallback
   if (name.toLowerCase().includes('jump rope')) attempts.push('jump rope');
   if (name.toLowerCase().includes('shadowboxing')) attempts.push('Shadowboxing footwork');
   if (name.toLowerCase().includes('heavy bag')) attempts.push('Heavy bag – Round 1');
 
-  // Final attempt: Speech Synthesis if no audio file was found
-  (async function tryAll() {
+  return new Promise(async (resolve) => {
     for (const a of attempts) {
       try {
         await tryPlay(a);
-        return; // Success!
+        return resolve();
       } catch (e) {}
     }
     
-    // Fallback: Speak the exercise name
     console.log('MP3 not found, using Speech Synthesis for:', name);
     try {
+      isSpeaking = true;
       const utterance = new SpeechSynthesisUtterance(name);
       utterance.lang = 'en-US';
       utterance.rate = 1.0;
+      utterance.onend = () => { isSpeaking = false; resolve(); };
+      utterance.onerror = () => { isSpeaking = false; resolve(); };
       speechSynthesis.speak(utterance);
     } catch (e) {
-      console.error('Speech synthesis failed too', e);
+      isSpeaking = false;
+      resolve();
     }
-  })();
+  });
 }
 
 function playBell()    { (new Audio('audio/jump rope.mp3')).play().catch(e=>{}); } 
@@ -443,8 +461,13 @@ function playTick() {
 }
 
 function playTimerSound(key) {
-  const s = new Audio(`audio/timer/${key}.mp3`);
-  s.play().catch(e => console.log('Timer audio fail:', key));
+  return new Promise((resolve) => {
+    const s = new Audio(`audio/timer/${key}.mp3`);
+    currentExAudio = s;
+    s.onended = () => { currentExAudio = null; resolve(); };
+    s.onerror = () => { currentExAudio = null; resolve(); };
+    s.play().catch(() => { currentExAudio = null; resolve(); });
+  });
 }
 
 function playGo() {
@@ -729,7 +752,7 @@ function renderExList() {
   document.getElementById('exListT').innerHTML = html;
 }
 
-function loadEx() {
+async function loadEx() {
   const ex = WORKOUTS[tActiveDay].exercises[tActiveEx];
   tRemaining = ex.secs;
   document.getElementById('timeBig').textContent = fmt(tRemaining);
@@ -754,8 +777,12 @@ function loadEx() {
     240: '4 minutes',
     300: '5 minutes'
   };
-  if (durMap[ex.secs]) playTimerSound(durMap[ex.secs]);
-  else playExerciseSound(ex.name);
+
+  stopCurrentAudio();
+  await playExerciseSound(ex.name);
+  if (durMap[ex.secs]) {
+    await playTimerSound(durMap[ex.secs]);
+  }
 
   if (ex.phase === 'boxing') {
     if (ex.name === 'HIIT – 10-punch burst  squat') {
