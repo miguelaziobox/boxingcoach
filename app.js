@@ -1,4 +1,4 @@
-/* ── DATA ── */
+/* ── DATA (v1.0.1 - Vercel Fix) ── */
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DNAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const CIRC = 2 * Math.PI * 50;
