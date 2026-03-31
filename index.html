@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boxing Coach App</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 2px; padding: 0 4px;">
+    <select id="langSelect" onchange="changeLanguage(this.value)" style="padding:4px 8px; border-radius:6px; font-size:11px; font-weight: 500; background:rgba(255,255,255,0.1); color:#ffffff; border:1px solid rgba(255,255,255,0.2); outline:none; cursor:pointer;">
+      <option value="en" style="color: black;">🇬🇧 EN</option>
+      <option value="pt-PT" style="color: black;">🇵🇹 PT-PT</option>
+    </select>
+  </div>
+  <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 0 4px;">
+    <h1 class="app-title" style="margin-bottom:0">Boxing Coach</h1>
+    <select id="userSelect" onchange="switchUser(this.value)" style="padding:6px 10px; border-radius:8px; font-size:13px; font-weight: 600; background:rgba(255,255,255,0.1); color:#ffffff; border:1px solid rgba(255,255,255,0.2); outline:none; cursor:pointer; text-shadow: 0 1px 2px rgba(0,0,0,0.5);">
+      <option value="1" style="color: black;">User 1 (1Yr B&rarr;A)</option>
+      <option value="2" style="color: black;">User 2 (6Mo B&rarr;A)</option>
+      <option value="3" style="color: black;">User 3 (6Mo B&rarr;I)</option>
+      <option value="4" style="color: black;">User 4 (6Mo I&rarr;A)</option>
+    </select>
+  </div>
+  <div class="tab-bar">
+    <button class="tab active" onclick="showView('calendar')">Calendar</button>
+    <button class="tab" onclick="showView('timer')">Workouts</button>
+    <button class="tab" onclick="showView('technique')">Technique</button>
+    <button class="tab" onclick="showView('settings')">Schedule</button>
+  </div>
+
+  <!-- CALENDAR VIEW -->
+  <div class="view active" id="view-calendar">
+    <div class="cal-nav">
+      <button class="nbtn" onclick="shiftMonth(-1)">&#9666;</button>
+      <div class="cal-title" id="calTitle"></div>
+      <button class="nbtn" onclick="shiftMonth(1)">&#9656;</button>
+    </div>
+    <div class="stats-row">
+      <div class="sc"><div class="sc-l">Sessions</div><div class="sc-v" id="sSess">–</div></div>
+      <div class="sc"><div class="sc-l">Completed</div><div class="sc-v" id="sDone">–</div></div>
+      <div class="sc"><div class="sc-l">Hours</div><div class="sc-v" id="sHrs">–</div></div>
+      <div class="sc"><div class="sc-l">Streak</div><div class="sc-v" id="sStr">–</div></div>
+    </div>
+    <div class="legend">
+      <div class="li"><div class="ld" style="background:#F09595"></div>Day A – Power</div>
+      <div class="li"><div class="ld" style="background:#85B7EB"></div>Day B – Speed</div>
+      <div class="li"><div class="ld" style="background:#97C459"></div>Day C – Conditioning</div>
+      <div class="li"><div class="ld ld-rest"></div>Rest</div>
+    </div>
+    <div class="dh-row" id="dhRow"></div>
+    <div class="cal-grid" id="calGrid"></div>
+    <div id="calDetail" style="display:none"></div>
+
+    <!-- TRX Lower Back Card -->
+    <a href="trx.html" style="text-decoration:none; display:block; margin-top:14px;">
+      <div style="
+        display:flex; align-items:center; gap:12px;
+        padding:13px 14px;
+        background: linear-gradient(135deg,rgba(0,201,167,0.12),rgba(74,144,217,0.12));
+        border: 1px solid rgba(0,201,167,0.25);
+        border-radius:14px;
+        backdrop-filter:blur(12px);
+        transition: background 0.2s;
+      ">
+        <div style="
+          width:40px; height:40px; border-radius:10px; flex-shrink:0;
+          background:linear-gradient(135deg,#00C9A7,#4A90D9);
+          display:flex; align-items:center; justify-content:center; font-size:20px;
+        ">🏋️</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:#fff">TRX Core & Back Health</div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.55);margin-top:1px">Suspension training for lower back pain relief</div>
+        </div>
+        <div style="font-size:18px; color:rgba(0,201,167,0.8)">&#9656;</div>
+      </div>
+    </a>
+  </div>
+
+  <!-- WORKOUTS VIEW -->
+  <div class="view" id="view-timer">
+    <div style="font-size: 11px; text-transform: uppercase; font-weight: 500; margin-bottom: 8px; color: var(--text-tertiary)">Scheduled Workouts</div>
+    <div class="day-tabs-t" id="dayTabsT"></div>
+    <div style="font-size: 11px; text-transform: uppercase; font-weight: 500; margin: 12px 0 8px; color: var(--text-tertiary)">Beginner Heavy Bag</div>
+    <div class="day-tabs-t" id="hbBegTabs"></div>
+    <div style="font-size: 11px; text-transform: uppercase; font-weight: 500; margin: 12px 0 8px; color: var(--text-tertiary)">Intermediate Heavy Bag</div>
+    <div class="day-tabs-t" id="hbIntTabs"></div>
+    <div style="font-size: 11px; text-transform: uppercase; font-weight: 500; margin: 12px 0 8px; color: var(--text-tertiary)">Advanced Heavy Bag</div>
+    <div class="day-tabs-t" id="hbAdvTabs"></div>
+    <div class="prog-bar-wrap">
+      <div class="prog-label"><span>Session progress</span><span id="progPct">0%</span></div>
+      <div class="prog-bar"><div class="prog-fill" id="progFill" style="width:0%"></div></div>
+    </div>
+    <div class="timer-card">
+      <div class="tc-top">
+        <div>
+          <div class="tc-sub">Now training</div>
+          <div class="tc-name" id="tcName">Select a day</div>
+        </div>
+        <div class="tc-badge" id="tcBadge"></div>
+      </div>
+      <div class="ring-wrap">
+        <svg width="130" height="130" class="prog-ring">
+          <circle class="ring-bg" cx="65" cy="65" r="50"/>
+          <circle class="ring-fg" id="ringFg" cx="65" cy="65" r="50" stroke="#E24B4A" stroke-dasharray="314.16" stroke-dashoffset="314.16"/>
+        </svg>
+        <div class="ring-center">
+          <div class="time-big" id="timeBig">0:00</div>
+        </div>
+      </div>
+      <div class="rnd-info" id="rndInfo"></div>
+      <div class="combo-box" id="comboBox" style="display:none">
+        <div class="combo-lbl" id="comboName">Combo</div>
+        <div class="combo-chips" id="comboChips"></div>
+        <div class="callout" id="callout"></div>
+      </div>
+      <div class="tc-controls">
+        <button class="cbtn" onclick="prevEx()">&#9666;</button>
+        <button class="cbtn primary" id="startBtn" onclick="toggleTimer()">Start</button>
+        <button class="cbtn" onclick="nextEx()">&#9656;</button>
+      </div>
+      <div class="next-up" id="nextUp"></div>
+    </div>
+    <div id="exListT"></div>
+  </div>
+
+  <!-- TECHNIQUE VIEW -->
+  <div class="view" id="view-technique">
+    <div style="font-size: 11px; text-transform: uppercase; font-weight: 500; margin-bottom: 8px; color: var(--text-tertiary)">Boxing Technique Library</div>
+    <div id="techniqueGrid" class="tech-grid"></div>
+  </div>
+
+  <!-- SETTINGS VIEW -->
+  <div class="view" id="view-settings">
+    <div class="settings-block">
+      <div class="settings-title">Long-term Training Plan</div>
+      <div class="settings-hint">Select a structured progressive program.</div>
+      <select id="programSelect" style="width:100%; padding:8px; margin:8px 0; border:1px solid var(--border); border-radius:8px; background:var(--bg-card); color:var(--text-primary)">
+        <option value="classic">Classic Weekly Pattern (A/B/C)</option>
+        <option value="6m-ba">6 Months: Beginner to Advanced (24 weeks)</option>
+        <option value="6m-bi">6 Months: Beginner to Intermediate (24 weeks)</option>
+        <option value="6m-ia">6 Months: Intermediate to Advanced (24 weeks)</option>
+        <option value="1y-ba">1 Year: Beginner to Advanced (52 weeks)</option>
+      </select>
+      <label style="font-size:12px; margin-top:8px; display:block">Program Start Date</label>
+      <input type="date" id="programStart" style="width:100%; padding:8px; margin:8px 0; border:1px solid var(--border); border-radius:8px; background:var(--bg-card); color:var(--text-primary)">
+    </div>
+    <div class="settings-block">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+        <div class="settings-title" style="margin-bottom:0">Choose training frequency</div>
+        <select id="dpwSelect" onchange="autoAssignDays(this.value)" style="padding:4px; font-size:11px; border-radius:4px; border:1px solid var(--border-mid); background:var(--bg-secondary); color:var(--text-primary);">
+          <option value="2">2 Days / Week</option>
+          <option value="3" selected>3 Days / Week</option>
+        </select>
+      </div>
+      <div class="day-assign-grid" id="dayAssignGrid"></div>
+      <div class="week-preview" id="weekPreview"></div>
+      <button class="save-btn" onclick="saveSchedule()">Save schedule</button>
+    </div>
+    <div class="settings-block">
+      <div class="settings-title">Day assignment order</div>
+      <div class="settings-hint">The order your workout days cycle through the week.</div>
+      <div class="order-row" id="orderRow"></div>
+    </div>
+  </div>
+</div>
+
+<script src="translations.js"></script>
+<script src="app.js?v=11"></script>
+</body>
+</html>

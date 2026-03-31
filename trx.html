@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TRX Core & Back – Boxing Coach</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  :root {
+    --trx-accent: #00C9A7;
+    --trx-accent2: #4A90D9;
+    --trx-warn: #F5A623;
+    --trx-danger: #E24B4A;
+  }
+
+  .trx-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+    padding: 14px 16px;
+    background: rgba(0,201,167,0.12);
+    border: 1px solid rgba(0,201,167,0.25);
+    border-radius: 14px;
+    backdrop-filter: blur(12px);
+  }
+  .trx-header-icon {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #00C9A7, #4A90D9);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; flex-shrink: 0;
+  }
+  .trx-header h2 {
+    margin: 0; font-size: 17px; font-weight: 700; color: var(--text-primary);
+    line-height: 1.2;
+  }
+  .trx-header p {
+    margin: 2px 0 0; font-size: 11px; color: var(--text-secondary);
+  }
+
+  .trx-back-btn {
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.08);
+    color: var(--text-secondary);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px; font-weight: 500;
+    cursor: pointer;
+    margin-bottom: 14px;
+    transition: background 0.2s;
+    text-decoration: none;
+  }
+  .trx-back-btn:hover { background: rgba(255,255,255,0.14); }
+
+  .trx-level-tabs {
+    display: flex; gap: 6px; margin-bottom: 16px; overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .trx-ltab {
+    flex-shrink: 0;
+    padding: 7px 14px;
+    border-radius: 20px;
+    border: 1.5px solid rgba(0,201,167,0.3);
+    background: rgba(0,201,167,0.08);
+    color: var(--text-secondary);
+    font-size: 12px; font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .trx-ltab.active {
+    background: linear-gradient(135deg, rgba(0,201,167,0.35), rgba(74,144,217,0.35));
+    border-color: var(--trx-accent);
+    color: var(--text-primary);
+  }
+
+  .trx-phase-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    font-weight: 700;
+    color: var(--trx-accent);
+    margin: 14px 0 6px;
+    padding: 0 2px;
+  }
+
+  .trx-ex-card {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 12px;
+    margin-bottom: 8px;
+    overflow: hidden;
+    transition: background 0.2s;
+  }
+  .trx-ex-card:hover { background: rgba(255,255,255,0.09); }
+
+  .trx-ex-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 14px;
+    cursor: pointer;
+  }
+  .trx-ex-dot {
+    width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+  }
+  .trx-ex-name {
+    flex: 1;
+    font-size: 13px; font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.3;
+  }
+  .trx-ex-detail {
+    font-size: 11px; font-weight: 400;
+    color: var(--text-secondary);
+    margin-top: 1px;
+  }
+  .trx-ex-meta {
+    font-size: 11px; font-weight: 700;
+    color: var(--trx-accent);
+    white-space: nowrap;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .trx-info-btn {
+    background: none; border: none;
+    color: var(--text-tertiary);
+    cursor: pointer; padding: 2px;
+    display: flex; align-items: center;
+    flex-shrink: 0;
+    transition: color 0.2s;
+  }
+  .trx-info-btn:hover { color: var(--trx-accent); }
+
+  .trx-info-panel {
+    display: none;
+    padding: 10px 14px 12px;
+    border-top: 1px solid rgba(255,255,255,0.07);
+    font-size: 12px; color: var(--text-secondary);
+    line-height: 1.6;
+    background: rgba(0,0,0,0.12);
+  }
+  .trx-info-panel .trx-warning {
+    display: flex; gap: 7px; align-items: flex-start;
+    background: rgba(245,166,35,0.12);
+    border: 1px solid rgba(245,166,35,0.3);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    font-size: 11px; color: var(--trx-warn);
+  }
+  .trx-tutorial-link {
+    display: inline-block; margin-top: 8px;
+    font-size: 12px; font-weight: 700;
+    color: var(--trx-accent);
+    text-decoration: none;
+  }
+  .trx-tutorial-link:hover { text-decoration: underline; }
+
+  .trx-disclaimer {
+    background: rgba(226,75,74,0.1);
+    border: 1px solid rgba(226,75,74,0.25);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: rgba(226,75,74,0.9);
+    margin-bottom: 14px;
+    line-height: 1.5;
+  }
+  .trx-disclaimer strong { display: block; margin-bottom: 2px; }
+
+  .trx-progress-wrap {
+    background: rgba(255,255,255,0.05);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    border: 1px solid rgba(255,255,255,0.07);
+  }
+  .trx-prog-label {
+    display: flex; justify-content:space-between;
+    font-size: 11px; color: var(--text-tertiary);
+    margin-bottom: 6px;
+  }
+  .trx-prog-bar {
+    height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px;
+  }
+  .trx-prog-fill {
+    height: 4px; border-radius: 2px;
+    background: linear-gradient(90deg, #00C9A7, #4A90D9);
+    transition: width 0.4s ease;
+  }
+
+  .trx-timer-btn {
+    width: 100%;
+    padding: 13px;
+    border-radius: 12px;
+    border: none;
+    background: linear-gradient(135deg, #00C9A7, #4A90D9);
+    color: #fff;
+    font-size: 15px; font-weight: 700;
+    cursor: pointer;
+    margin-top: 8px;
+    letter-spacing: 0.03em;
+    transition: opacity 0.2s;
+  }
+  .trx-timer-btn:hover { opacity: 0.88; }
+  .trx-timer-btn:disabled { opacity: 0.4; cursor: default; }
+
+  .trx-timer-display {
+    text-align: center;
+    padding: 20px 0 12px;
+  }
+  .trx-timer-ex-name {
+    font-size: 16px; font-weight: 700; color: var(--text-primary);
+    margin-bottom: 4px;
+  }
+  .trx-timer-phase {
+    font-size: 11px; text-transform: uppercase; letter-spacing:.06em;
+    color: var(--trx-accent); margin-bottom: 16px;
+  }
+  .trx-timer-clock {
+    font-size: 56px; font-weight: 800;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -2px;
+  }
+  .trx-timer-round {
+    font-size: 12px; color: var(--text-secondary); margin-top:6px;
+  }
+  .trx-timer-controls {
+    display: flex; gap: 10px; justify-content: center; margin-top: 14px;
+  }
+  .trx-ctrl-btn {
+    flex: 1; max-width: 120px;
+    padding: 10px; border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.07);
+    color: var(--text-primary);
+    font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: background 0.2s;
+  }
+  .trx-ctrl-btn:hover { background: rgba(255,255,255,0.13); }
+  .trx-ctrl-btn.primary {
+    background: linear-gradient(135deg, rgba(0,201,167,0.4), rgba(74,144,217,0.4));
+    border-color: rgba(0,201,167,0.4);
+  }
+
+  .trx-next-up {
+    text-align:center; font-size:12px; color: var(--text-tertiary); margin-top: 8px;
+  }
+  .trx-next-up span { color: var(--text-secondary); font-weight:600; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <a href="index.html" class="trx-back-btn">
+    &#9666; Back to Boxing Coach
+  </a>
+
+  <div class="trx-header">
+    <div class="trx-header-icon">🏋️</div>
+    <div>
+      <h2>TRX Core & Back Health</h2>
+      <p>Suspension Training for Lower Back Pain Relief</p>
+    </div>
+  </div>
+
+  <div class="trx-disclaimer">
+    <strong>⚠️ Medical Disclaimer</strong>
+    Consult your doctor or physiotherapist before starting if you have acute lower back pain,
+    herniated discs, sciatica, or recent spinal surgery. Stop immediately if pain increases.
+  </div>
+
+  <!-- Level Tabs -->
+  <div class="trx-level-tabs">
+    <button class="trx-ltab active" onclick="setLevel('pain-relief')">Pain Relief</button>
+    <button class="trx-ltab" onclick="setLevel('foundation')">Foundation</button>
+    <button class="trx-ltab" onclick="setLevel('strength')">Core Strength</button>
+    <button class="trx-ltab" onclick="setLevel('performance')">Performance</button>
+  </div>
+
+  <!-- Progress Bar -->
+  <div class="trx-progress-wrap">
+    <div class="trx-prog-label">
+      <span id="trxProgLabel">Workout Progress</span>
+      <span id="trxProgPct">0%</span>
+    </div>
+    <div class="trx-prog-bar"><div class="trx-prog-fill" id="trxProgFill" style="width:0%"></div></div>
+  </div>
+
+  <!-- Exercise List -->
+  <div id="trxExList"></div>
+
+  <!-- Timer Section -->
+  <div id="trxTimerSection" style="display:none">
+    <div class="trx-timer-display">
+      <div class="trx-timer-ex-name" id="trxTimerName">–</div>
+      <div class="trx-timer-phase" id="trxTimerPhase">–</div>
+      <div class="trx-timer-clock" id="trxTimerClock">0:00</div>
+      <div class="trx-timer-round" id="trxTimerRound"></div>
+    </div>
+    <div class="trx-timer-controls">
+      <button class="trx-ctrl-btn" onclick="trxPrevEx()">&#9666; Prev</button>
+      <button class="trx-ctrl-btn primary" id="trxStartBtn" onclick="trxToggle()">Start</button>
+      <button class="trx-ctrl-btn" onclick="trxNextEx()">Next &#9656;</button>
+    </div>
+    <div class="trx-next-up" id="trxNextUp"></div>
+  </div>
+
+  <button class="trx-timer-btn" id="trxLaunchBtn" onclick="launchTrxTimer()">▶ Start Workout Timer</button>
+
+</div>
+
+<script src="translations.js"></script>
+<script>
+// ── TRX WORKOUT DATA ──
+
+const TRX_WORKOUTS = {
+  'pain-relief': {
+    label: 'Phase 1 – Pain Relief & Mobility',
+    color: '#00C9A7',
+    description: 'Gentle decompression and activation. Focus on breathing and pain-free range.',
+    exercises: [
+      // WARM-UP
+      { phase: 'Warm-up', name: 'TRX Standing Row – Slow', sets: '2×10 reps', duration: 60, detail: 'Strap length: mid-length. Gentle lumbar traction.',
+        info: 'Stand facing the anchor at 45°. Lean back, arms extended. Pull chest to hands, squeezing shoulder blades. Return slowly. Do NOT arch the lower back.', warn: 'Avoid if acute pain worsens.' },
+      { phase: 'Warm-up', name: 'Supine Pelvic Tilt', sets: '2×12 reps', duration: 60, detail: 'Floor exercise, use strap for balance only.',
+        info: 'Lie on back, knees bent. Gently flatten the lower back against the floor by tightening the abs. Hold 3s. This resets the lumbar curve and activates deep stabilisers.', warn: null },
+      { phase: 'Warm-up', name: 'TRX Hip Hinge', sets: '2×10 reps', duration: 60, detail: 'Hinge at hip, not low back.',
+        info: 'Hold straps, feet hip-width. Push hips back (like closing a car door with your glutes), keeping a neutral spine. Feel a stretch in the hamstrings. Drive hips forward to return.', warn: null },
+
+      // CORE ACTIVATION
+      { phase: 'Core Activation', name: 'TRX Fallout (Kneeling)', sets: '2×8 reps', duration: 90, detail: 'Short strap. Go only as far as pain-free.',
+        info: 'Kneel, holding straps overhead. Lean forward keeping a rigid plank from knees to ears. Engage TVA (deep abs) as you fall out. Pull back with lats, not lower back.', warn: 'No arching – keep ribcage down.' },
+      { phase: 'Core Activation', name: 'TRX Supported Glute Bridge', sets: '3×10 reps', duration: 90, detail: 'Feet in straps. Drives glutes, relieves lumbar compression.',
+        info: 'Lie on back, heels in foot cradles (strap mid-calf length). Push feet into straps and lift hips until body is a straight line. Squeeze glutes hard at the top. Lower slowly.', warn: null },
+      { phase: 'Core Activation', name: 'Bird Dog (TRX Assisted)', sets: '2×8/side', duration: 90, detail: 'Hold one strap for balance. Focus: opposite arm/leg.',
+        info: 'On all fours, hold a strap with one hand for stability. Extend opposite arm and leg simultaneously keeping spine neutral and pelvis level. Hold 2s at top. Builds multifidus stability.', warn: null },
+
+      // MOBILITY
+      { phase: 'Mobility', name: 'TRX Chest Stretch', sets: '2×30s', duration: 60, detail: 'Opens thoracic spine, reducing lower back compensation.',
+        info: 'Face away from anchor with arms in straps (elbows bent, hands near ears). Walk forward. Feel chest open and thoracic extend. Breathe deeply. Deep breathing decompresses discs.', warn: null },
+      { phase: 'Mobility', name: 'TRX Hip Flexor Stretch', sets: '2×30s/side', duration: 60, detail: 'Tight hip flexors = lower back pain. Key release.',
+        info: 'Lunge forward, back knee on pad. Hold one strap for balance. Push hips forward, posteriorly tilt pelvis (tuck tailbone). Feel a deep stretch in the front of the hip. Breathing magnifies the release.', warn: null },
+      { phase: 'Mobility', name: 'TRX Supine Twist', sets: '2×30s/side', duration: 60, detail: 'Gentle lumbar rotation. Floor exercise.',
+        info: 'Lie on back, arms wide, knees bent. Use strap loosely for balance. Let both knees fall to one side slowly. Look the opposite direction. Releases the QL and piriformis – common culprits of back pain.', warn: null },
+
+      // COOL-DOWN
+      { phase: 'Cool-down', name: 'TRX Assisted Forward Fold', sets: '2×30s', duration: 60, detail: 'Decompress entire posterior chain.',
+        info: 'Face anchor, hold straps long. Hinge forward and let the straps take your weight as you fold. Let the spine hang and lengthen. Do not force. Breathe and melt deeper with each exhale.', warn: null },
+      { phase: 'Cool-down', name: 'TRX Child\'s Pose Stretch', sets: '1×60s', duration: 60, detail: 'Full lumbar and thoracic decompression.',
+        info: 'Hold straps, kneel back to heels, arms extended forward. Let your chest sink toward the floor. The strap suspension allows a deeper stretch than floor child\'s pose. Excellent for L4-L5 disc relief.', warn: null },
+    ]
+  },
+
+  'foundation': {
+    label: 'Phase 2 – Foundation Stability',
+    color: '#4A90D9',
+    description: 'Build deep stabiliser strength. Spine-neutral positions throughout.',
+    exercises: [
+      { phase: 'Warm-up', name: 'TRX Overhead Squat', sets: '2×12 reps', duration: 60, detail: 'Ankles, knees, hips all mobilised.',
+        info: 'Hold straps overhead, arms straight. Squat deep keeping chest tall and lumbar neutral. The straps act as a counterbalance, allowing a deeper, safer squat. Builds lower body strength without axial loading (no weight through spine).', warn: null },
+      { phase: 'Warm-up', name: 'Cat-Cow on TRX', sets: '2×10 reps', duration: 60, detail: 'Hands in straps. Suspended spinal flexion/extension.',
+        info: 'Face anchor in quadruped position over strap handles. Arch spine up (cat) fully, then let it sag (cow). The subtle instability of the straps heightens proprioceptive feedback in the lumbar stabilisers.', warn: null },
+
+      { phase: 'Core Stability', name: 'TRX Plank', sets: '3×20s', duration: 90, detail: 'Feet in cradles. Anterior core + anti-extension.',
+        info: 'Feet in foot cradles, forearms on floor. Body is a rigid plank. Every micro-movement of the straps fires the deep TVA and multifidus – the spine\'s internal corset. Progress to 30s then 45s.', warn: 'If lower back dips, drop to knees.' },
+      { phase: 'Core Stability', name: 'TRX Single-Leg Squat', sets: '3×8/side', duration: 90, detail: 'Unilateral loading corrects hip imbalances.',
+        info: 'Hold straps, stand on one leg. Lower into a single-leg squat. The strap support allows you to progressively increase depth. Single-leg work exposes and corrects pelvic/hip asymmetries common in back pain sufferers.', warn: null },
+      { phase: 'Core Stability', name: 'TRX Pike', sets: '3×10 reps', duration: 90, detail: 'Feet in cradles. Dynamic anti-extension.',
+        info: 'Start in a plank (feet in cradles). Drive hips up into an inverted-V by pulling feet toward anchor. Keep legs straight, core solid. Lower with control. Builds anterior chain strength to support L-spine.', warn: 'Advance slowly – high demand on lumbar stabilisers.' },
+      { phase: 'Core Stability', name: 'TRX Low Row', sets: '3×12 reps', duration: 90, detail: 'Posterior chain activation. Reverses desk posture.',
+        info: 'Facing anchor, lean back (body straight). Pull elbows to ribcage, squeezing shoulder blades together. Keep hips extended throughout. Activates rhomboids, mid-traps and erector spinae in a supported, safe position.', warn: null },
+
+      { phase: 'Cool-down', name: 'TRX Lat Stretch', sets: '2×30s/side', duration: 60, detail: 'Releases thoracolumbar fascia.',
+        info: 'Hold one strap, side-step away from anchor, letting the arm overhead and bending sideways. Feel a full lateral stretch from hip to armpit. The QL and lat connect — releasing both reduces lower back tension.', warn: null },
+      { phase: 'Cool-down', name: 'Supine Hamstring Stretch (TRX)', sets: '2×30s/side', duration: 60, detail: 'Tight hamstrings increase lumbar flexion forces.',
+        info: 'Lie on back, heel in strap. Gently pull strap to bring leg toward ceiling. Adjust strap length to match your flexibility. A straight but not strained leg. Breathe. Hamstring tightness is a top cause of chronic low back pain.', warn: null },
+    ]
+  },
+
+  'strength': {
+    label: 'Phase 3 – Core Strength',
+    color: '#F5A623',
+    description: 'Progressive loading of the core with full spinal protection and control.',
+    exercises: [
+      { phase: 'Warm-up', name: 'TRX Jump Squat (Low Impact)', sets: '2×10 reps', duration: 60, detail: 'Hold straps for safety. Land softly.',
+        info: 'Hold straps, squat to parallel. Jump explosively, land softly through toes-to-heels. The TRX strap acts as a safety net, preventing forward lean and protecting the lumbar spine during the landing phase.', warn: 'Skip if any spinal pain occurs on landing.' },
+      { phase: 'Warm-up', name: 'TRX Inchworm', sets: '2×8 reps', duration: 60, detail: 'Full chain activation warm-up.',
+        info: 'Start standing. Walk hands forward to push-up position (feet in straps optional). Walk back to stand. Full posterior chain warm-up that progressively loads the lumbar erectors without any axial compression.', warn: null },
+
+      { phase: 'Core Strength', name: 'TRX Rollout', sets: '3×10 reps', duration: 90, detail: 'Like an ab wheel but safer. Full anti-extension load.',
+        info: 'Face anchor, hold straps. Arms overhead, hinge forward at hips with rigid core, reaching arms forward as far as strength allows. Pull back. This is the gold standard TRX core exercise – directly trains the anti-extension capacity that protects L4-L5.', warn: 'Do NOT arch. Stop if lumbar pain.' },
+      { phase: 'Core Strength', name: 'TRX Side Plank', sets: '3×25s/side', duration: 90, detail: 'Feet in cradles. Anti-lateral flexion.',
+        info: 'Feet stacked in foot cradles, side-lying on forearm. Stack hips. Hold rigid. The rotational instability of the suspended feet fires the QL and obliques far more intensely than a floor side plank. QL weakness is a key back pain driver.', warn: 'Drop hips immediately if lower back hurts.' },
+      { phase: 'Core Strength', name: 'TRX Body Saw', sets: '3×12 reps', duration: 90, detail: 'Feet in cradles. Shifts load dynamically on the lumbar stabilisers.',
+        info: 'Forearm plank with feet in cradles. Push body forward (saw back), then pull back using forearms. The constant shifting demand on the L-spine stabilisers mimics real-life load transfer. Begin with tiny range of motion and expand as strength increases.', warn: null },
+      { phase: 'Core Strength', name: 'TRX Hip Press', sets: '3×12 reps', duration: 90, detail: 'Double-leg hip drive. Glute dominance over lumbar.',
+        info: 'Lie on back, heels in cradles. Bridge up (glute bridge position). From the top, perform a small hip press up and down using just the glutes – NOT the lower back. Teaches true glute-dominant movement pattern essential for a back-pain-free life.', warn: null },
+      { phase: 'Core Strength', name: 'TRX Standing Anti-Rotation', sets: '3×8/side', duration: 90, detail: 'Oblique and lateral stability training.',
+        info: 'Hold both straps with arms extended. Stand sideways to anchor. Resist the rotational pull by keeping core braced and hips square. Anti-rotation exercises build the oblique-dominated core suit that protects the lumbar spine during all twisting activities.', warn: null },
+
+      { phase: 'Cool-down', name: 'TRX Assisted Deep Squat Hold', sets: '2×40s', duration: 80, detail: 'Lumbar, hip and ankle mobility combined.',
+        info: 'Hold straps, lower into a deep squat. Let elbows press knees open. Tuck tailbone slightly. Breathe. This position powerfully decompresses the lumbar discs, reverses daily sitting compression, and opens the hips simultaneously.', warn: null },
+      { phase: 'Cool-down', name: 'TRX Standing Thoracic Extension', sets: '2×30s', duration: 60, detail: 'Thoracic mobility = lumbar relief.',
+        info: 'Face away from anchor. Hold straps overhead. Walk forward and let chest open skyward, thoracic spine extending over the straps. A tight thoracic spine forces the lumbar to compensate – mobilising it here is a direct lower back pain treatment.', warn: null },
+    ]
+  },
+
+  'performance': {
+    label: 'Phase 4 – Athletic Performance',
+    color: '#E24B4A',
+    description: 'High-intensity core training integrating boxing movement patterns.',
+    exercises: [
+      { phase: 'Warm-up', name: 'TRX Explosive Row', sets: '3×8 reps', duration: 60, detail: 'Full body power. Fast concentric, slow eccentric.',
+        info: 'Lean aggressively back (high difficulty). Pull explosively, releasing hands at the top. Catch straps and lower slowly. This explosive pulling pattern directly trains the muscle chains used in boxing hooks and crosses, with full spinal protection from the strap angle.', warn: null },
+      { phase: 'Warm-up', name: 'TRX Power Pull', sets: '3×6/side', duration: 60, detail: 'Rotational power. Boxing-specific.',
+        info: 'Hold both straps in one hand, stand sideways to anchor. Rotate aggressively pulling straps in a punching/chopping pattern. This trains the anti-rotation PLUS rotational power transfer — the exact core demand in boxing that must be protected with a healthy lumbar.', warn: null },
+
+      { phase: 'Core Power', name: 'TRX Atomic Push-Up', sets: '3×10 reps', duration: 90, detail: 'Feet in cradles. Combines push-up + knee tuck.',
+        info: 'Feet in cradles, hands on floor. Perform a push-up. At the top, drive both knees to chest. Return slowly. The combination demands simultaneous anterior and posterior chain activation — the definition of true functional core strength.', warn: 'High demand – master TRX Plank first.' },
+      { phase: 'Core Power', name: 'TRX Single-Arm Row (Rotational)', sets: '3×10/side', duration: 90, detail: 'Mimics the rotational pull in boxing.',
+        info: 'Hold one strap with one hand. Row hard, rotating the torso and reaching the free hand behind you at the top. Return through full rotation. Trains the exact movement of a lead hook or cross – but with full control of lumbar load through the strap assist.', warn: null },
+      { phase: 'Core Power', name: 'TRX Mountain Climber', sets: '3×15/side', duration: 90, detail: 'Feet in cradles. Fast but controlled.',
+        info: 'Plank position with feet in cradles. Drive alternate knees rapidly toward chest. The oscillation of the suspended feet massively amplifies core demand. This is the integration exercise that bridges TRX core training with boxing conditioning.', warn: null },
+      { phase: 'Core Power', name: 'TRX Plank to Pike Jump', sets: '3×8 reps', duration: 90, detail: 'Explosive hip flexion combined with anti-extension.',
+        info: 'From a TRX plank (feet in cradles), explosively pull feet to a pike, then return. The fast-stretch-shortening cycle trains the core\'s reactive capacity — crucial for absorbing punches and generating power in boxing without injuring the lower back.', warn: null },
+      { phase: 'Core Power', name: 'TRX Bulgarian Split Squat', sets: '3×8/side', duration: 90, detail: 'Rear foot in strap. Maximum unilateral quad/glute strength.',
+        info: 'Face away from anchor, rear foot in foot cradle behind you. Lower into a lunge position. The elevated rear foot creates deep hip flexor stretch AND high unilateral loading without any spinal compression. Builds the leg strength for powerful boxing footwork.', warn: 'Start shallow. Increase depth gradually.' },
+
+      { phase: 'Cool-down', name: 'TRX Full Body Stretch Flow', sets: '1×3 min', duration: 180, detail: 'Slow movement through all ranges.',
+        info: 'Use straps to flow between: forward fold, runner\'s lunge, twisted lunge, standing lat stretch, and standing thoracic extension. Take 3 full breaths in each position. This post-session flow is your most powerful tool for maintaining the gains of each workout.', warn: null },
+    ]
+  }
+};
+
+// ── STATE ──
+let trxCurrentLevel = 'pain-relief';
+let trxCurrentEx = 0;
+let trxRunning = false;
+let trxInterval = null;
+let trxRemaining = 0;
+let trxRound = 1;
+let audioCtx = null;
+
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playTick() {
+  try {
+    ensureAudio();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.connect(g); g.connect(audioCtx.destination);
+    o.type = 'sine'; o.frequency.setValueAtTime(800, audioCtx.currentTime);
+    g.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.07);
+    o.start(); o.stop(audioCtx.currentTime + 0.1);
+  } catch(e) {}
+}
+function playDone() {
+  try {
+    ensureAudio();
+    [440, 550, 660].forEach((f, i) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.connect(g); g.connect(audioCtx.destination);
+      o.type = 'sine'; o.frequency.setValueAtTime(f, audioCtx.currentTime);
+      g.gain.setValueAtTime(0.2, audioCtx.currentTime + i * 0.15);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + i * 0.15 + 0.3);
+      o.start(audioCtx.currentTime + i * 0.15);
+      o.stop(audioCtx.currentTime + i * 0.15 + 0.35);
+    });
+  } catch(e) {}
+}
+
+function fmt(s) {
+  return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+}
+
+function setLevel(level) {
+  trxCurrentLevel = level;
+  trxCurrentEx = 0;
+  trxRound = 1;
+  stopTrxTimer();
+  document.querySelectorAll('.trx-ltab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  renderTrxExList();
+  hideTrxTimer();
+  updateTrxProgress();
+}
+
+function renderTrxExList() {
+  const wo = TRX_WORKOUTS[trxCurrentLevel];
+  let html = `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;line-height:1.5">${wo.description}</div>`;
+  let lastPh = null;
+
+  wo.exercises.forEach((ex, i) => {
+    if (ex.phase !== lastPh) {
+      html += `<div class="trx-phase-label">${ex.phase}</div>`;
+      lastPh = ex.phase;
+    }
+    const dotColor = TRX_WORKOUTS[trxCurrentLevel].color;
+    const ytLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(ex.name + ' TRX suspension training tutorial')}`;
+    html += `
+      <div class="trx-ex-card" id="trxCard${i}">
+        <div class="trx-ex-row" onclick="toggleTrxInfo(${i})">
+          <div class="trx-ex-dot" style="background:${dotColor}"></div>
+          <div style="flex:1">
+            <div class="trx-ex-name">${ex.name}</div>
+            ${ex.detail ? `<div class="trx-ex-detail">${ex.detail}</div>` : ''}
+          </div>
+          <div class="trx-ex-meta">${ex.sets}</div>
+          <button class="trx-info-btn" style="pointer-events:none">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+            </svg>
+          </button>
+        </div>
+        <div class="trx-info-panel" id="trxInfo${i}">
+          ${ex.warn ? `<div class="trx-warning">⚠️ ${ex.warn}</div>` : ''}
+          ${ex.info}
+          <br><a class="trx-tutorial-link" href="${ytLink}" target="_blank">▶ Watch Tutorial</a>
+        </div>
+      </div>`;
+  });
+
+  document.getElementById('trxExList').innerHTML = html;
+  updateTrxProgress();
+}
+
+function toggleTrxInfo(i) {
+  const panel = document.getElementById('trxInfo' + i);
+  if (panel) panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+}
+
+function updateTrxProgress() {
+  const wo = TRX_WORKOUTS[trxCurrentLevel];
+  const pct = Math.round((trxCurrentEx / wo.exercises.length) * 100);
+  document.getElementById('trxProgFill').style.width = pct + '%';
+  document.getElementById('trxProgPct').textContent = pct + '%';
+  document.getElementById('trxProgLabel').textContent =
+    `${trxCurrentEx} / ${wo.exercises.length} exercises`;
+}
+
+function launchTrxTimer() {
+  const sec = document.getElementById('trxTimerSection');
+  sec.style.display = sec.style.display === 'none' ? 'block' : 'none';
+  if (sec.style.display === 'block') {
+    loadTrxEx();
+    sec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } else {
+    stopTrxTimer();
+  }
+}
+
+function hideTrxTimer() {
+  document.getElementById('trxTimerSection').style.display = 'none';
+  stopTrxTimer();
+}
+
+function loadTrxEx() {
+  const wo = TRX_WORKOUTS[trxCurrentLevel];
+  if (trxCurrentEx >= wo.exercises.length) {
+    document.getElementById('trxTimerName').textContent = '✅ Workout Complete!';
+    document.getElementById('trxTimerPhase').textContent = 'Great work!';
+    document.getElementById('trxTimerClock').textContent = '—';
+    document.getElementById('trxTimerRound').textContent = '';
+    document.getElementById('trxNextUp').innerHTML = '';
+    document.getElementById('trxStartBtn').disabled = true;
+    updateTrxProgress();
+    return;
+  }
+  const ex = wo.exercises[trxCurrentEx];
+  trxRemaining = ex.duration;
+  document.getElementById('trxTimerName').textContent = ex.name;
+  document.getElementById('trxTimerPhase').textContent = ex.phase + ' · ' + ex.sets;
+  document.getElementById('trxTimerClock').textContent = fmt(trxRemaining);
+  document.getElementById('trxTimerClock').style.color = TRX_WORKOUTS[trxCurrentLevel].color;
+  document.getElementById('trxStartBtn').disabled = false;
+  document.getElementById('trxStartBtn').textContent = 'Start';
+  updateTrxNextUp();
+  updateTrxProgress();
+
+  // Highlight active card
+  document.querySelectorAll('.trx-ex-card').forEach((c, i) => {
+    c.style.border = i === trxCurrentEx
+      ? `1.5px solid ${TRX_WORKOUTS[trxCurrentLevel].color}`
+      : '1px solid rgba(255,255,255,0.09)';
+  });
+  const card = document.getElementById('trxCard' + trxCurrentEx);
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function updateTrxNextUp() {
+  const wo = TRX_WORKOUTS[trxCurrentLevel];
+  const el = document.getElementById('trxNextUp');
+  if (trxCurrentEx < wo.exercises.length - 1) {
+    el.innerHTML = `Next: <span>${wo.exercises[trxCurrentEx + 1].name}</span>`;
+  } else {
+    el.innerHTML = '<span>Final exercise!</span>';
+  }
+}
+
+function trxToggle() {
+  ensureAudio();
+  if (trxRunning) {
+    stopTrxTimer();
+    document.getElementById('trxStartBtn').textContent = 'Resume';
+  } else {
+    trxRunning = true;
+    document.getElementById('trxStartBtn').textContent = 'Pause';
+    trxInterval = setInterval(() => {
+      trxRemaining--;
+      document.getElementById('trxTimerClock').textContent = fmt(trxRemaining);
+      if (trxRemaining <= 3 && trxRemaining > 0) playTick();
+      if (trxRemaining <= 0) {
+        playDone();
+        trxCurrentEx++;
+        trxRound = 1;
+        clearInterval(trxInterval);
+        trxRunning = false;
+        loadTrxEx();
+        updateTrxProgress();
+      }
+    }, 1000);
+  }
+}
+
+function stopTrxTimer() {
+  trxRunning = false;
+  clearInterval(trxInterval);
+  trxInterval = null;
+}
+
+function trxPrevEx() {
+  stopTrxTimer();
+  if (trxCurrentEx > 0) { trxCurrentEx--; loadTrxEx(); }
+}
+
+function trxNextEx() {
+  stopTrxTimer();
+  const wo = TRX_WORKOUTS[trxCurrentLevel];
+  if (trxCurrentEx < wo.exercises.length - 1) { trxCurrentEx++; loadTrxEx(); }
+}
+
+// Init
+renderTrxExList();
+</script>
+</body>
+</html>
