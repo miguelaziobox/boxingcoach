@@ -332,7 +332,7 @@ iframe.goog-te-banner-frame { display: none !important; }
   justify-content: center;
   margin: 0.25rem 0 0.75rem;
   position: relative;
-  height: 130px;
+  height: 180px;
 }
 .prog-ring { transform: rotate(-90deg); }
 .ring-bg { fill: none; stroke: var(--border-light); stroke-width: 7; }
@@ -341,13 +341,13 @@ iframe.goog-te-banner-frame { display: none !important; }
   position: absolute;
   top: 0; left: 50%;
   transform: translateX(-50%);
-  width: 130px; height: 130px;
+  width: 180px; height: 180px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
 }
-.time-big { font-size: 38px; font-weight: 500; line-height: 1; }
+.time-big { font-size: 54px; font-weight: 500; line-height: 1; }
 .rnd-info { text-align: center; font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
 
 .combo-box {

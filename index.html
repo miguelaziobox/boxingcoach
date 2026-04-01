@@ -102,9 +102,9 @@
         <div class="tc-badge" id="tcBadge"></div>
       </div>
       <div class="ring-wrap">
-        <svg width="130" height="130" class="prog-ring">
-          <circle class="ring-bg" cx="65" cy="65" r="50"/>
-          <circle class="ring-fg" id="ringFg" cx="65" cy="65" r="50" stroke="#E24B4A" stroke-dasharray="314.16" stroke-dashoffset="314.16"/>
+        <svg width="180" height="180" class="prog-ring">
+          <circle class="ring-bg" cx="90" cy="90" r="75"/>
+          <circle class="ring-fg" id="ringFg" cx="90" cy="90" r="75" stroke="#E24B4A" stroke-dasharray="471.24" stroke-dashoffset="471.24"/>
         </svg>
         <div class="ring-center">
           <div class="time-big" id="timeBig">0:00</div>
@@ -112,7 +112,14 @@
       </div>
       <div class="rnd-info" id="rndInfo"></div>
       <div class="combo-box" id="comboBox" style="display:none">
-        <div class="combo-lbl" id="comboName">Combo</div>
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom: 5px;">
+          <div class="combo-lbl" id="comboName" style="margin-bottom:0;">Combo</div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <label style="font-size:9px; color:var(--text-tertiary); text-transform:uppercase;">Speed</label>
+            <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.1" value="1.0" oninput="updateSpeed(this.value)" style="width:60px; accent-color: var(--blue);">
+            <span id="speedVal" style="font-size:10px; color:var(--text-primary); font-weight:500; min-width:26px;">1.0x</span>
+          </div>
+        </div>
         <div class="combo-chips" id="comboChips"></div>
         <div class="callout" id="callout"></div>
       </div>
@@ -134,6 +141,15 @@
 
   <!-- SETTINGS VIEW -->
   <div class="view" id="view-settings">
+    <div class="settings-block">
+      <div class="settings-title">Fitness Level</div>
+      <div class="settings-hint">Adjusts the intensity, volume, and complexity of your scheduled workouts (Days A–D).</div>
+      <div style="display:flex; gap:8px; margin-top:4px;">
+        <button id="lvl-beginner"    class="cbtn" style="flex:1; font-size:12px;" onclick="setLevel('beginner')">🥊 Beginner</button>
+        <button id="lvl-intermediate" class="cbtn" style="flex:1; font-size:12px;" onclick="setLevel('intermediate')">⚡ Intermediate</button>
+        <button id="lvl-advanced"   class="cbtn" style="flex:1; font-size:12px;" onclick="setLevel('advanced')">🔥 Advanced</button>
+      </div>
+    </div>
     <div class="settings-block">
       <div class="settings-title">Long-term Training Plan</div>
       <div class="settings-hint">Select a structured progressive program.</div>
