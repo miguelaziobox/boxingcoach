@@ -901,13 +901,9 @@ function beginExerciseTimer() {
         tRound = 1;
         const wo = WORKOUTS[tActiveDay];
         if (tActiveEx < wo.exercises.length - 1) {
-          tActiveEx++; renderExList(); loadEx();
           clearInterval(tInterval);
-          tRunning = false;
-          const nex = wo.exercises[tActiveEx];
-          startCountdown(() => {
-            beginExerciseTimer();
-          });
+          tActiveEx++; renderExList(); loadEx();
+          stopTimer();
           return;
         } else {
           stopTimer();
