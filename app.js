@@ -1175,14 +1175,14 @@ function changeRound(dir) {
 const PUNCH_SOUNDS = {
   jab:          new Audio('audio/jab.mp3'),
   cross:        new Audio('audio/cross.mp3'),
-  'lead-hook':  new Audio('audio/L%20Hook.mp3'),
-  'rear-hook':  new Audio('audio/R%20Hook.mp3'),
-  'lead-upper': new Audio('audio/L%20Upper.mp3'),
-  'rear-upper': new Audio('audio/R%20Upper.mp3'),
-  'body-jab':       new Audio('audio/Body%20Jab.mp3'),
-  'body-cross':     new Audio('audio/Body%20Cross.mp3'),
-  'body-lead-hook': new Audio('audio/Body%20Lead%20Hook.mp3'),
-  'body-rear-hook': new Audio('audio/Body%20Rear%20Hook.mp3'),
+  'lead-hook':  new Audio('audio/L_Hook.mp3'),
+  'rear-hook':  new Audio('audio/R_Hook.mp3'),
+  'lead-upper': new Audio('audio/L_Upper.mp3'),
+  'rear-upper': new Audio('audio/R_Upper.mp3'),
+  'body-jab':       new Audio('audio/Body_Jab.mp3'),
+  'body-cross':     new Audio('audio/Body_Cross.mp3'),
+  'body-lead-hook': new Audio('audio/Body_Lead_Hook.mp3'),
+  'body-rear-hook': new Audio('audio/Body_Rear_Hook.mp3'),
   slip:         new Audio('audio/slip.mp3'),
   roll:         new Audio('audio/Roll.mp3'),
   feint:        new Audio('audio/Feint.mp3'),
@@ -1217,7 +1217,8 @@ function playExerciseSound(name) {
 
   const tryPlay = (filename) => {
     return new Promise((resolve, reject) => {
-      const s = new Audio(`audio/${filename}.mp3`);
+      const safeFilename = filename.replace(/ /g, '_');
+      const s = new Audio(`audio/${safeFilename}.mp3`);
       currentExAudio = s;
       s.onended = () => { currentExAudio = null; resolve(); };
       s.onerror = (e) => { currentExAudio = null; reject(e); };
