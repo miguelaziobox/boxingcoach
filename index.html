@@ -17,11 +17,7 @@
   </div>
   <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 0 4px;">
     <h1 class="app-title" style="margin-bottom:0">Boxing Coach</h1>
-    <select id="userSelect" onchange="switchUser(this.value)" style="padding:6px 10px; border-radius:8px; font-size:13px; font-weight: 600; background:rgba(255,255,255,0.1); color:#ffffff; border:1px solid rgba(255,255,255,0.2); outline:none; cursor:pointer; text-shadow: 0 1px 2px rgba(0,0,0,0.5);">
-      <option value="1" style="color: black;">User 1 (1Yr B&rarr;A)</option>
-      <option value="2" style="color: black;">User 2 (6Mo B&rarr;A)</option>
-      <option value="3" style="color: black;">User 3 (6Mo B&rarr;I)</option>
-      <option value="4" style="color: black;">User 4 (6Mo I&rarr;A)</option>
+    <select id="userSelect" onchange="handleUserSelect(this.value)" style="padding:6px 10px; border-radius:8px; font-size:13px; font-weight: 600; background:rgba(255,255,255,0.1); color:#ffffff; border:1px solid rgba(255,255,255,0.2); outline:none; cursor:pointer; text-shadow: 0 1px 2px rgba(0,0,0,0.5);">
     </select>
   </div>
   <div class="tab-bar">
@@ -123,6 +119,11 @@
         <div class="combo-chips" id="comboChips"></div>
         <div class="callout" id="callout"></div>
       </div>
+      
+      <div id="punchReference" style="display:none; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border);">
+        <div style="font-size: 10px; text-transform: uppercase; font-weight: 600; color: var(--text-tertiary); margin-bottom: 8px; text-align: left;">All Movements (Freestyle Reference)</div>
+        <div id="punchReferenceGrid" style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center;"></div>
+      </div>
       <div class="tc-controls">
         <button class="cbtn" onclick="prevEx()">&#9666;</button>
         <button class="cbtn primary" id="startBtn" onclick="toggleTimer()">Start</button>
@@ -154,11 +155,11 @@
       <div class="settings-title">Long-term Training Plan</div>
       <div class="settings-hint">Select a structured progressive program.</div>
       <select id="programSelect" style="width:100%; padding:8px; margin:8px 0; border:1px solid var(--border); border-radius:8px; background:var(--bg-card); color:var(--text-primary)">
-        <option value="classic">Classic Weekly Pattern (A/B/C)</option>
-        <option value="6m-ba">6 Months: Beginner to Advanced (24 weeks)</option>
-        <option value="6m-bi">6 Months: Beginner to Intermediate (24 weeks)</option>
-        <option value="6m-ia">6 Months: Intermediate to Advanced (24 weeks)</option>
-        <option value="1y-ba">1 Year: Beginner to Advanced (52 weeks)</option>
+        <option value="classic" style="color: black;">Classic Weekly Pattern (A/B/C)</option>
+        <option value="6m-ba" style="color: black;">6 Months: Beginner to Advanced (24 weeks)</option>
+        <option value="6m-bi" style="color: black;">6 Months: Beginner to Intermediate (24 weeks)</option>
+        <option value="6m-ia" style="color: black;">6 Months: Intermediate to Advanced (24 weeks)</option>
+        <option value="1y-ba" style="color: black;">1 Year: Beginner to Advanced (52 weeks)</option>
       </select>
       <label style="font-size:12px; margin-top:8px; display:block">Program Start Date</label>
       <input type="date" id="programStart" style="width:100%; padding:8px; margin:8px 0; border:1px solid var(--border); border-radius:8px; background:var(--bg-card); color:var(--text-primary)">
@@ -167,8 +168,8 @@
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
         <div class="settings-title" style="margin-bottom:0">Choose training frequency</div>
         <select id="dpwSelect" onchange="autoAssignDays(this.value)" style="padding:4px; font-size:11px; border-radius:4px; border:1px solid var(--border-mid); background:var(--bg-secondary); color:var(--text-primary);">
-          <option value="2">2 Days / Week</option>
-          <option value="3" selected>3 Days / Week</option>
+          <option value="2" style="color: black;">2 Days / Week</option>
+          <option value="3" style="color: black;" selected>3 Days / Week</option>
         </select>
       </div>
       <div class="day-assign-grid" id="dayAssignGrid"></div>
@@ -183,6 +184,18 @@
   </div>
 </div>
 
+<div id="profileModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; justify-content:center; align-items:center;">
+  <div style="background:#222; padding:30px; border-radius:12px; width:300px; text-align:center; border:1px solid #444;">
+    <h3 style="margin-top:0;">Enter Profile Name</h3>
+    <input type="text" id="profileNameInput" placeholder="Name..." maxlength="15" style="width:100%; box-sizing:border-box; padding:10px; margin:15px 0; border-radius:6px; border:1px solid #555; background:#111; color:white; font-size:16px;">
+    <div style="display:flex; justify-content:space-between; gap:10px;">
+      <button onclick="closeProfileModal()" style="flex:1; padding:10px; border-radius:6px; background:#444; border:none; color:white; cursor:pointer;">Cancel</button>
+      <button onclick="saveProfileModal()" style="flex:1; padding:10px; border-radius:6px; background:#e24b4a; border:none; color:white; font-weight:bold; cursor:pointer;">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="translations.js"></script>
 <script src="app.js?v=11"></script>
 </body>

@@ -283,6 +283,10 @@ const PT_DICT = {
   'Round': 'Ronda',
   'of': 'de',
   'Conditioning': 'Condicionamento',
+  'Week': 'Semana',
+  'Beginner': 'Iniciante',
+  'Intermediate': 'Intermédio',
+  'Advanced': 'Avançado',
 
   // ─── Tutorial Links ───
   '▶ Watch Tutorial': '▶ Ver Tutorial',
