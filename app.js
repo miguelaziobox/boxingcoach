@@ -980,15 +980,107 @@ const HB_CD = [
 ];
 
 const HB_DATA = {
-  HB_BEG_1: { label: 'HB 1', pill: 'pa', color: '#BA7517', exercises: [...HB_WUP, { name: 'Heavy bag – Round 1', phase: 'boxing', secs: 180, rounds: 3, detail: 'Focus on Jab distance', noBack: true }, ...HB_CD ] },
-  HB_BEG_2: { label: 'HB 2', pill: 'pa', color: '#BA7517', exercises: [...HB_WUP, { name: 'Heavy bag – Round 2', phase: 'boxing', secs: 180, rounds: 3, detail: 'Focus on 1-2 Combo', noBack: true }, ...HB_CD ] },
-  HB_BEG_3: { label: 'HB 3', pill: 'pa', color: '#BA7517', exercises: [...HB_WUP, { name: 'Heavy bag – Round 3', phase: 'boxing', secs: 180, rounds: 3, detail: 'Focus on Lead Hook', noBack: true }, ...HB_CD ] },
-  HB_INT_1: { label: 'HB 1', pill: 'pb', color: '#185FA5', exercises: [...HB_WUP, { name: 'Heavy bag – Def. Counters', phase: 'boxing', secs: 180, rounds: 4, detail: 'Slip and Counter', noBack: true }, ...HB_CD ] },
-  HB_INT_2: { label: 'HB 2', pill: 'pb', color: '#185FA5', exercises: [...HB_WUP, { name: 'Heavy bag – Body Snatcher', phase: 'boxing', secs: 180, rounds: 4, detail: 'Level changing focus', noBack: true }, ...HB_CD ] },
-  HB_INT_3: { label: 'HB 3', pill: 'pb', color: '#185FA5', exercises: [...HB_WUP, { name: 'Heavy bag – Counters', phase: 'boxing', secs: 180, rounds: 4, detail: 'Catch and Reply', noBack: true }, ...HB_CD ] },
-  HB_ADV_1: { label: 'HB 1', pill: 'pc', color: '#E24B4A', exercises: [...HB_WUP, { name: 'Heavy bag – Burnout', phase: 'boxing', secs: 180, rounds: 5, detail: 'Max intensity intervals', noBack: true }, ...HB_CD ] },
-  HB_ADV_2: { label: 'HB 2', pill: 'pc', color: '#E24B4A', exercises: [...HB_WUP, { name: 'Heavy bag – Technical HIIT', phase: 'boxing', secs: 180, rounds: 5, detail: 'Explosive technique bursts', noBack: true }, ...HB_CD ] },
-  HB_ADV_3: { label: 'HB 3', pill: 'pc', color: '#E24B4A', exercises: [...HB_WUP, { name: 'Heavy bag – Tabata', phase: 'boxing', secs: 240, rounds: 4, detail: 'Sprints on the bag', noBack: true }, ...HB_CD ] },
+  HB_BEG_1: { label: 'HB 1', pill: 'pa', color: '#BA7517', exercises: [
+    ...HB_WUP,
+    { name: 'Heavy bag – Round 1',          phase: 'boxing',   secs: 120, rounds: 3, detail: 'Focus on Jab distance', noBack: true },
+    RBTR60,
+    { name: 'Heavy bag – Round 2',          phase: 'boxing',   secs: 120, rounds: 2, detail: 'Focus on 1-2 Combo', noBack: true },
+    RBTR60,
+    { name: 'Push-ups',                     phase: 'strength', secs: 30,  rounds: 3, detail: '8-12 reps' },
+    REST30,
+    { name: 'Plank',                        phase: 'core',     secs: 45,  rounds: 2, detail: 'Hold steady' },
+    ...HB_CD 
+  ]},
+  HB_BEG_2: { label: 'HB 2', pill: 'pa', color: '#BA7517', exercises: [
+    ...HB_WUP,
+    { name: 'Heavy bag – Round 3',          phase: 'boxing',   secs: 120, rounds: 3, detail: 'Focus on Lead Hook', noBack: true },
+    RBTR60,
+    { name: 'Heavy bag – body shots',       phase: 'boxing',   secs: 120, rounds: 2, detail: 'Bend knees, dig hooks' },
+    RBTR60,
+    { name: 'Bodyweight squats',            phase: 'strength', secs: 30,  rounds: 3, detail: '15 reps' },
+    REST30,
+    { name: 'Bicycle crunches',             phase: 'core',     secs: 30,  rounds: 2, detail: 'Controlled rotation' },
+    ...HB_CD 
+  ]},
+  HB_BEG_3: { label: 'HB 3', pill: 'pa', color: '#BA7517', exercises: [
+    ...HB_WUP,
+    { name: 'Heavy bag – power shots',      phase: 'boxing',   secs: 120, rounds: 3, detail: 'Full rotation, sit on punches' },
+    RBTR60,
+    { name: 'Heavy bag – Endurance',        phase: 'boxing',   secs: 180, rounds: 2, detail: 'Keep moving, keep popping', noBack: true },
+    RBTR60,
+    { name: 'Walking lunges',               phase: 'strength', secs: 40,  rounds: 2, detail: 'Stay balanced' },
+    REST30,
+    { name: 'Mountain climbers',            phase: 'core',     secs: 40,  rounds: 2, detail: 'Moderate pace' },
+    ...HB_CD 
+  ]},
+  
+  HB_INT_1: { label: 'HB 1', pill: 'pb', color: '#185FA5', exercises: [
+    ...HB_WUP,
+    { name: 'Heavy bag – Def. Counters',    phase: 'boxing',   secs: 180, rounds: 3, detail: 'Slip and Counter', noBack: true },
+    RBTR60,
+    { name: 'Heavy bag – Body Snatcher',    phase: 'boxing',   secs: 180, rounds: 2, detail: 'Level changing focus', noBack: true },
+    RBTR60,
+    { name: 'Push-ups – shoulder taps',     phase: 'strength', secs: 45,  rounds: 2, detail: 'Stability focus' },
+    REST30,
+    { name: 'Russian twists',                phase: 'core',     secs: 45,  rounds: 2, detail: 'Fast rotation', noBack: true },
+    ...HB_CD 
+  ]},
+  HB_INT_2: { label: 'HB 2', pill: 'pb', color: '#185FA5', exercises: [
+    ...HB_WUP,
+    { name: 'Heavy bag – Level Mixing',     phase: 'boxing',   secs: 180, rounds: 3, detail: 'Head & Body combos' },
+    RBTR60,
+    { name: 'Heavy bag – Counters',          phase: 'boxing',   secs: 180, rounds: 2, detail: 'Catch and Reply', noBack: true },
+    RBTR60,
+    { name: 'Jump squats',                  phase: 'strength', secs: 45,  rounds: 2, detail: 'Explosive power' },
+    REST30,
+    { name: 'V-sits',                       phase: 'core',     secs: 45,  rounds: 2, detail: 'Core tension' },
+    ...HB_CD 
+  ]},
+  HB_INT_3: { label: 'HB 3', pill: 'pb', color: '#185FA5', exercises: [
+    ...HB_WUP,
+    { name: 'Heavy bag – Power Pyramid',    phase: 'boxing',   secs: 180, rounds: 3, detail: 'Build the volume' },
+    RBTR60,
+    { name: 'Heavy bag – Technical HIIT',   phase: 'boxing',   secs: 180, rounds: 2, detail: 'Explosive technique bursts', noBack: true },
+    RBTR60,
+    { name: 'Push-ups',                     phase: 'strength', secs: 60,  rounds: 2, detail: 'Max reps' },
+    REST30,
+    { name: 'Leg raises',                   phase: 'core',     secs: 45,  rounds: 2, detail: 'Lower abs' },
+    ...HB_CD 
+  ]},
+
+  HB_ADV_1: { label: 'HB 1', pill: 'pc', color: '#E24B4A', exercises: [
+    ...HB_WUP,
+    { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 180, rounds: 4, detail: 'Max intensity intervals', noBack: true },
+    RBTR45,
+    { name: 'Heavy bag – Speed Tabata',     phase: 'boxing',   secs: 240, rounds: 2, detail: 'Sprints on the bag', noBack: true },
+    RBTR60,
+    { name: 'Burpees',                      phase: 'strength', secs: 60,  rounds: 3, detail: 'Max heart rate' },
+    REST30,
+    { name: 'Russian twists',                phase: 'core',     secs: 60,  rounds: 2, detail: 'Full range', noBack: true },
+    ...HB_CD 
+  ]},
+  HB_ADV_2: { label: 'HB 2', pill: 'pc', color: '#E24B4A', exercises: [
+    ...HB_WUP,
+    { name: 'Heavy bag – Technical HIIT',   phase: 'boxing',   secs: 180, rounds: 4, detail: 'Explosive speed', noBack: true },
+    RBTR45,
+    { name: 'Heavy bag – Inside Fighting',  phase: 'boxing',   secs: 180, rounds: 2, detail: 'Rip hooks & uppercuts' },
+    RBTR60,
+    { name: 'Jump squats',                  phase: 'strength', secs: 60,  rounds: 3, detail: 'Explosivity' },
+    REST30,
+    { name: 'Hollow body hold',             phase: 'core',     secs: 60,  rounds: 2, detail: 'Total core burn' },
+    ...HB_CD 
+  ]},
+  HB_ADV_3: { label: 'HB 3', pill: 'pc', color: '#E24B4A', exercises: [
+    ...HB_WUP,
+    { name: 'Heavy bag – Tabata',           phase: 'boxing',   secs: 240, rounds: 4, detail: 'Interval sprints', noBack: true },
+    RBTR45,
+    { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 180, rounds: 2, detail: 'No mercy', noBack: true },
+    RBTR60,
+    { name: 'Burpees',                      phase: 'strength', secs: 60,  rounds: 3, detail: 'Empty the tank' },
+    REST30,
+    { name: 'Plank',                        phase: 'core',     secs: 90,  rounds: 2, detail: 'Mental toughness' },
+    ...HB_CD 
+  ]},
 };
 
 Object.assign(WORKOUTS_BEG, HB_DATA);
