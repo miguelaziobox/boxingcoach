@@ -65,6 +65,26 @@ window.addEventListener('DOMContentLoaded', () => {
   applyTranslations(document.body);
   highlightLevel();
   
+  // Restore rest controls from saved values
+  const pauseSlider = document.getElementById('pauseSlider');
+  if (pauseSlider) {
+    const pVal = comboPauseMs / 1000;
+    pauseSlider.value = pVal;
+    const pauseValEl = document.getElementById('pauseVal');
+    if (pauseValEl) pauseValEl.textContent = (pVal % 1 === 0 ? pVal.toFixed(0) : pVal.toFixed(1)) + 's';
+  }
+  const restMinSlider = document.getElementById('restMinSlider');
+  if (restMinSlider) {
+    restMinSlider.value = restMinMs / 1000;
+    document.getElementById('restMinVal').textContent = (restMinMs / 1000 % 1 === 0 ? (restMinMs/1000).toFixed(0) : (restMinMs/1000).toFixed(1)) + 's';
+  }
+  const restMaxSlider = document.getElementById('restMaxSlider');
+  if (restMaxSlider) {
+    restMaxSlider.value = restMaxMs / 1000;
+    document.getElementById('restMaxVal').textContent = (restMaxMs / 1000 % 1 === 0 ? (restMaxMs/1000).toFixed(0) : (restMaxMs/1000).toFixed(1)) + 's';
+  }
+  applyRestModeUI();
+
   if (currentLang !== 'en') {
     const observer = new MutationObserver((mutations) => {
       observer.disconnect();
@@ -1109,6 +1129,11 @@ let isCountingDown = false;
 let currentExAudio = null;
 let isSpeaking = false;
 let comboSpeedMultiplier = 1.0;
+let comboPauseMs = parseInt(localStorage.getItem('comboPauseMs') || '3000');
+let restMode = localStorage.getItem('restMode') || 'fixed';
+let restMinMs = parseInt(localStorage.getItem('restMinMs') || '1000');
+let restMaxMs = parseInt(localStorage.getItem('restMaxMs') || '5000');
+let restCountdownInterval = null;
 
 function setLevel(level) {
   localStorage.setItem('fitnessLevel', level);
@@ -1134,6 +1159,73 @@ function updateSpeed(val) {
   comboSpeedMultiplier = parseFloat(val);
   const el = document.getElementById('speedVal');
   if (el) el.textContent = val + 'x';
+}
+
+function fmtRestVal(num) {
+  return (num % 1 === 0 ? num.toFixed(0) : num.toFixed(1)) + 's';
+}
+
+function updatePause(val) {
+  comboPauseMs = parseFloat(val) * 1000;
+  localStorage.setItem('comboPauseMs', comboPauseMs);
+  const el = document.getElementById('pauseVal');
+  if (el) el.textContent = fmtRestVal(parseFloat(val));
+}
+
+function toggleRestMode() {
+  restMode = restMode === 'fixed' ? 'random' : 'fixed';
+  localStorage.setItem('restMode', restMode);
+  applyRestModeUI();
+}
+
+function applyRestModeUI() {
+  const fixedBtn = document.getElementById('restFixedBtn');
+  const randomBtn = document.getElementById('restRandomBtn');
+  const fixedCtrl = document.getElementById('restFixedControls');
+  const randomCtrl = document.getElementById('restRandomControls');
+  if (!fixedBtn) return;
+  if (restMode === 'fixed') {
+    fixedBtn.style.background = '#F5A623'; fixedBtn.style.color = '#000';
+    randomBtn.style.background = 'transparent'; randomBtn.style.color = 'var(--text-tertiary)';
+    fixedCtrl.style.display = 'flex';
+    randomCtrl.style.display = 'none';
+  } else {
+    fixedBtn.style.background = 'transparent'; fixedBtn.style.color = 'var(--text-tertiary)';
+    randomBtn.style.background = '#F5A623'; randomBtn.style.color = '#000';
+    fixedCtrl.style.display = 'none';
+    randomCtrl.style.display = 'block';
+  }
+}
+
+function updateRestMin(val) {
+  restMinMs = parseFloat(val) * 1000;
+  if (restMinMs > restMaxMs) {
+    restMaxMs = restMinMs;
+    localStorage.setItem('restMaxMs', restMaxMs);
+    document.getElementById('restMaxSlider').value = val;
+    document.getElementById('restMaxVal').textContent = fmtRestVal(parseFloat(val));
+  }
+  localStorage.setItem('restMinMs', restMinMs);
+  document.getElementById('restMinVal').textContent = fmtRestVal(parseFloat(val));
+}
+
+function updateRestMax(val) {
+  restMaxMs = parseFloat(val) * 1000;
+  if (restMaxMs < restMinMs) {
+    restMinMs = restMaxMs;
+    localStorage.setItem('restMinMs', restMinMs);
+    document.getElementById('restMinSlider').value = val;
+    document.getElementById('restMinVal').textContent = fmtRestVal(parseFloat(val));
+  }
+  localStorage.setItem('restMaxMs', restMaxMs);
+  document.getElementById('restMaxVal').textContent = fmtRestVal(parseFloat(val));
+}
+
+function getRestDuration() {
+  if (restMode === 'random') {
+    return restMinMs + Math.random() * (restMaxMs - restMinMs);
+  }
+  return comboPauseMs;
 }
 
 function renderRndInfo(ex) {
@@ -1768,17 +1860,45 @@ function fireCombo(combo) {
     }
     delay += (punchDelay / comboSpeedMultiplier);
   });
+  // After last punch, brief pause then show next combo + rest countdown
   comboSeqId = setTimeout(() => {
     if (!tRunning) return;
     const ex = getWorkouts()[tActiveDay].exercises[tActiveEx];
     currentCombo = generateNextCombo(ex);
     renderChips(currentCombo, -1);
-    setTimeout(() => { if (tRunning) fireCombo(currentCombo); }, 600 / comboSpeedMultiplier);
-  }, delay + (800 / comboSpeedMultiplier));
+
+    // Get rest duration (fixed or random)
+    const thisRestMs = getRestDuration();
+
+    // Show reposition countdown
+    const callout = document.getElementById('callout');
+    let restSecs = Math.ceil(thisRestMs / 1000);
+    callout.textContent = '🥊 ' + T('Reposition') + '... ' + restSecs + 's';
+    callout.style.opacity = '0.7';
+
+    if (restCountdownInterval) clearInterval(restCountdownInterval);
+    restCountdownInterval = setInterval(() => {
+      restSecs--;
+      if (restSecs > 0) {
+        callout.textContent = '🥊 ' + T('Reposition') + '... ' + restSecs + 's';
+      } else {
+        clearInterval(restCountdownInterval);
+        restCountdownInterval = null;
+        callout.style.opacity = '1';
+      }
+    }, 1000);
+
+    setTimeout(() => {
+      if (restCountdownInterval) { clearInterval(restCountdownInterval); restCountdownInterval = null; }
+      callout.style.opacity = '1';
+      if (tRunning) fireCombo(currentCombo);
+    }, thisRestMs);
+  }, delay + 500);
 }
 
 function clearSeq() {
   if (comboSeqId) { clearTimeout(comboSeqId); comboSeqId = null; }
+  if (restCountdownInterval) { clearInterval(restCountdownInterval); restCountdownInterval = null; }
 }
 
 function toggleTimer() {

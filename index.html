@@ -113,12 +113,39 @@
       </div>
       <div class="rnd-info" id="rndInfo"></div>
       <div class="combo-box" id="comboBox" style="display:none">
-        <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom: 5px;">
-          <div class="combo-lbl" id="comboName" style="margin-bottom:0;">Combo</div>
-          <div style="display:flex; align-items:center; gap:6px;">
-            <label style="font-size:9px; color:var(--text-tertiary); text-transform:uppercase;">Speed</label>
-            <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.1" value="1.0" oninput="updateSpeed(this.value)" style="width:60px; accent-color: var(--blue);">
-            <span id="speedVal" style="font-size:10px; color:var(--text-primary); font-weight:500; min-width:26px;">1.0x</span>
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 5px;">
+          <div class="combo-lbl" id="comboName" style="margin-bottom:0; margin-top:4px;">Combo</div>
+          <div style="display:flex; flex-direction:column; gap:5px; align-items:flex-end;">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:9px; color:var(--text-tertiary); text-transform:uppercase; min-width:32px; text-align:right;">Speed</label>
+              <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.1" value="1.0" oninput="updateSpeed(this.value)" style="width:60px; accent-color: var(--blue);">
+              <span id="speedVal" style="font-size:10px; color:var(--text-primary); font-weight:500; min-width:26px;">1.0x</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:9px; color:var(--text-tertiary); text-transform:uppercase; min-width:32px; text-align:right;">Rest</label>
+              <div style="display:flex; border-radius:4px; overflow:hidden; border:1px solid rgba(255,255,255,0.15); cursor:pointer; flex-shrink:0;" onclick="toggleRestMode()">
+                <span id="restFixedBtn" style="font-size:8px; padding:2px 6px; background:#F5A623; color:#000; font-weight:600; transition:all 0.2s;">Fixed</span>
+                <span id="restRandomBtn" style="font-size:8px; padding:2px 6px; background:transparent; color:var(--text-tertiary); font-weight:600; transition:all 0.2s;">Random</span>
+              </div>
+            </div>
+            <!-- Fixed rest: single slider -->
+            <div id="restFixedControls" style="display:flex; align-items:center; gap:6px;">
+              <input type="range" id="pauseSlider" min="0.5" max="10" step="0.5" value="3" oninput="updatePause(this.value)" style="width:80px; accent-color: #F5A623;">
+              <span id="pauseVal" style="font-size:10px; color:var(--text-primary); font-weight:500; min-width:26px;">3s</span>
+            </div>
+            <!-- Random rest: min/max sliders -->
+            <div id="restRandomControls" style="display:none;">
+              <div style="display:flex; align-items:center; gap:4px; margin-bottom:3px;">
+                <label style="font-size:8px; color:var(--text-tertiary); text-transform:uppercase; min-width:22px; text-align:right;">Min</label>
+                <input type="range" id="restMinSlider" min="0.5" max="10" step="0.5" value="1" oninput="updateRestMin(this.value)" style="width:60px; accent-color: #F5A623;">
+                <span id="restMinVal" style="font-size:10px; color:var(--text-primary); font-weight:500; min-width:22px;">1s</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:4px;">
+                <label style="font-size:8px; color:var(--text-tertiary); text-transform:uppercase; min-width:22px; text-align:right;">Max</label>
+                <input type="range" id="restMaxSlider" min="0.5" max="10" step="0.5" value="5" oninput="updateRestMax(this.value)" style="width:60px; accent-color: #F5A623;">
+                <span id="restMaxVal" style="font-size:10px; color:var(--text-primary); font-weight:500; min-width:22px;">5s</span>
+              </div>
+            </div>
           </div>
         </div>
         <div class="combo-chips" id="comboChips"></div>
@@ -202,6 +229,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="translations.js"></script>
-<script src="app.js?v=13"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>
