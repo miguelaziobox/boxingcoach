@@ -1,7 +1,7 @@
-/* ── DATA (v1.0.1 - Vercel Fix) ── */
+/* ── DATA (v2.0.0 - Enhanced Boxing Coach) ── */
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DNAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const CIRC = 2 * Math.PI * 75;
+const CIRC = 2 * Math.PI * 78;
 
 // Initialize Supabase Client
 const SUPABASE_URL = 'https://fuqmqcusthzmqekltpkk.supabase.co';
@@ -9,9 +9,12 @@ const SUPABASE_ANON_KEY = 'sb_publishable_dZPVMFIFhd3sXQdx_B9mtw_wVvv5oq7';
 const sbClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 let currentLang = localStorage.getItem('lang') || 'en';
+let audioMode = localStorage.getItem('boxingAudioMode') || 'both'; // 'both', 'sfx', 'voice', 'silent'
+let wakeLock = null;
+let wakeLockManual = false;
 
 let userProfiles = JSON.parse(localStorage.getItem('boxingProfiles')) || [
-  { id: '1', name: 'Fighter 1' }
+  { id: '1', name: 'Fighter 1', customCombos: [] }
 ];
 let activeUserId = localStorage.getItem('activeUserId') || userProfiles[0].id;
 if (!userProfiles.find(p => p.id === activeUserId)) activeUserId = userProfiles[0].id;
@@ -20,13 +23,85 @@ let programStartDate = localStorage.getItem('programStartDate') || new Date().to
 let completed = {};
 let supabaseProfileId = null;
 
+/* ── SCREEN WAKE LOCK ── */
+async function requestWakeLock() {
+  if ('wakeLock' in navigator) {
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => {
+        updateWakeLockUI(false);
+      });
+      updateWakeLockUI(true);
+    } catch (err) {
+      console.warn('Wake Lock error:', err);
+      updateWakeLockUI(false);
+    }
+  }
+}
+
+async function releaseWakeLock() {
+  if (wakeLock) {
+    try {
+      await wakeLock.release();
+      wakeLock = null;
+    } catch (e) {}
+  }
+  updateWakeLockUI(false);
+}
+
+function toggleWakeLock() {
+  if (wakeLock) {
+    wakeLockManual = false;
+    releaseWakeLock();
+  } else {
+    wakeLockManual = true;
+    requestWakeLock();
+  }
+}
+
+function updateWakeLockUI(active) {
+  const btn = document.getElementById('wakeLockBtn');
+  const txt = document.getElementById('wakeLockText');
+  if (!btn || !txt) return;
+  if (active) {
+    btn.classList.add('active');
+    txt.textContent = T('Awake');
+  } else {
+    btn.classList.remove('active');
+    txt.textContent = T('Screen Awake');
+  }
+}
+
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && (tRunning || intRunning || wakeLockManual)) {
+    await requestWakeLock();
+  }
+});
+
+/* ── HAPTIC VIBRATION ── */
+function triggerHaptic(pattern = [35]) {
+  if (navigator.vibrate) {
+    try { navigator.vibrate(pattern); } catch (e) {}
+  }
+}
+
+/* ── AUDIO MODE ── */
+function setAudioMode(mode) {
+  audioMode = mode;
+  localStorage.setItem('boxingAudioMode', mode);
+  ['both', 'sfx', 'voice', 'silent'].forEach(m => {
+    const btn = document.getElementById('am-' + m);
+    if (btn) btn.classList.toggle('active', m === mode);
+  });
+}
+
 function populateProfiles() {
   const select = document.getElementById('userSelect');
   if (!select) return;
   select.innerHTML = userProfiles.map(p => 
     `<option value="${p.id}" style="color: black;" ${p.id === activeUserId ? 'selected' : ''}>${T(p.name)}</option>`
   ).join('');
-  if (userProfiles.length < 4) {
+  if (userProfiles.length < 5) {
     select.innerHTML += `<option value="new" style="color: black; font-weight: bold;">${T('+ Add Profile')}</option>`;
   }
 }
@@ -52,7 +127,7 @@ function saveProfileModal() {
   if (pName && pName.trim()) {
     document.getElementById('profileModal').style.display = 'none';
     const newId = Date.now().toString();
-    userProfiles.push({ id: newId, name: pName.trim() });
+    userProfiles.push({ id: newId, name: pName.trim(), customCombos: [] });
     localStorage.setItem('boxingProfiles', JSON.stringify(userProfiles));
     switchUser(newId);
   }
@@ -64,6 +139,7 @@ window.addEventListener('DOMContentLoaded', () => {
   populateProfiles();
   applyTranslations(document.body);
   highlightLevel();
+  setAudioMode(audioMode);
   
   // Restore rest controls from saved values
   const pauseSlider = document.getElementById('pauseSlider');
@@ -150,7 +226,8 @@ async function initSupabaseSync() {
   if (data) {
     data.forEach(row => { completed[row.day_key] = true; });
   }
-  if (document.getElementById('view-calendar').classList.contains('active')) buildCalendar();
+  if (document.getElementById('view-calendar')?.classList.contains('active')) buildCalendar();
+  buildBadgesGrid();
 }
 
 function changeLanguage(lang) {
@@ -166,7 +243,8 @@ function switchUser(id) {
   
   initSupabaseSync().then(() => {
     buildCalendar();
-    if (document.getElementById('view-timer').classList.contains('active')) {
+    buildBadgesGrid();
+    if (document.getElementById('view-timer')?.classList.contains('active')) {
       buildTimerTabs(); renderExList(); loadEx(false);
     } else if (document.getElementById('calDetail')?.style.display === 'block') {
       if (selectedCalDay) {
@@ -259,16 +337,16 @@ const COMBOS_ADV = [
   { name: 'Tyson Drill (Roll–6–3–2)',           punches: ['roll', 'rear-upper', 'lead-hook', 'cross'] },
 ];
 
-// Legacy alias for backward compatibility
-const COMBOS = COMBOS_INT;
-
 function getCombosForLevel() {
-  const level = localStorage.getItem('fitnessLevel') || 'intermediate';
-  const date = new Date();
-  const workouts = getWorkoutsForDateRange(date);
-  if (workouts === WORKOUTS_BEG) return COMBOS_BEG;
-  if (workouts === WORKOUTS_ADV) return COMBOS_ADV;
-  return COMBOS_INT;
+  const profile = userProfiles.find(p => p.id === activeUserId);
+  const customCombos = profile?.customCombos || [];
+  
+  const workouts = getWorkoutsForDateRange(new Date());
+  let baseCombos = COMBOS_INT;
+  if (workouts === WORKOUTS_BEG) baseCombos = COMBOS_BEG;
+  if (workouts === WORKOUTS_ADV) baseCombos = COMBOS_ADV;
+  
+  return [...baseCombos, ...customCombos];
 }
 
 const PHASE_META = {
@@ -276,7 +354,7 @@ const PHASE_META = {
   boxing:   { label: 'Boxing',    cls: 'eph-boxing',   color: '#E24B4A' },
   strength: { label: 'Strength',  cls: 'eph-strength', color: '#185FA5' },
   core:     { label: 'Core',      cls: 'eph-core',     color: '#639922' },
-  cooldown: { label: 'Cool-down', cls: 'eph-cooldown', color: '#0F6E56' },
+  cooldown: { label: 'Cool-down', cls: 'eph-cooldown', color: '#00C9A7' },
   rest:     { label: 'Rest',      cls: 'eph-rest',     color: '#888780' },
 };
 
@@ -350,34 +428,6 @@ const PUNCH_LIBRARY = [
     desc: 'The art of deceptive movement to bait a reaction, blind an opponent, or create an opening for a real attack.',
     tips: ['Use your eyes, hands, and shoulders to sell the fake.', 'Ensure the feint is subtle but convincing.', 'Be ready to capitalize on the opening instantly.'],
     yt: 'https://www.youtube.com/results?search_query=boxing+feinting+tutorial'
-  },
-  { 
-    id: 'parry', 
-    name: 'The Parry', 
-    desc: 'Deflecting a straight punch by tapping it with the palm of your glove, directing it away from your centerline.',
-    tips: ['Use short, sharp tapping motions.', 'Do not reach out; wait for the punch to come to you.', 'Keep your elbows tucked and stay protected.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+parry+tutorial'
-  },
-  { 
-    id: 'catch-shoot', 
-    name: 'Catch & Shoot', 
-    desc: 'A classic counter-punching skill where you catch a punch with your glove and fire back immediately.',
-    tips: ['Absorption and retaliation should be one fluid motion.', 'Keep your feet planted to generate counter-power.', 'Always protect the side of your head while shooting back.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+catch+and+shoot+tutorial'
-  },
-  { 
-    id: 'sprawl', 
-    name: 'The Sprawl', 
-    desc: 'A dynamic conditioning and defensive move used to drop your hips to the floor and evade low attacks or build explosive power.',
-    tips: ['Shoot your legs back as far as possible.', 'Drop your hips flush to the floor.', 'Explode back up into your fighting stance immediately.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+sprawl+drill'
-  },
-  { 
-    id: 'weighted-shadow', 
-    name: 'Weighted Shadowboxing', 
-    desc: 'Shadowboxing while holding light dumbbells (1-2kg) to significantly increase shoulder endurance and punch snap.',
-    tips: ['Do not go too heavy; the goal is speed and form.', 'Focus on keeping your hands up even when tired.', 'Maintain perfect technique; do not lunge or over-extend.'],
-    yt: 'https://www.youtube.com/results?search_query=weighted+shadowboxing+tutorial'
   }
 ];
 
@@ -396,10 +446,6 @@ const EXERCISE_INFO = {
   'Shadowboxing – full combos': 'Put together all offensive and defensive tools. Be creative and visualize a real sparring round.',
   'Shadowboxing – defensive': 'Emphasize your guard, head movement, and footwork retreats. Only throw counter punches.',
   'Shadowboxing – full speed': 'Simulate fight pace. Throw punches with max speed while maintaining form and defense.',
-  'Shadowboxing – Ghost Sparring': 'Imagine a specific opponent (taller, shorter, aggressive). React to their imaginary movements with footwork, slips, and counters.',
-  'Shadowboxing – Brain Training': 'Throw a DIFFERENT three-punch combination every single time for a full round. Improves mental sharpness and variety.',
-  'Shadowboxing – Combo Stacking': 'Start with a 1-2, then add a hook, then a slip, then more shots – building up to an 8-punch sequence progressively.',
-  'Shadowboxing – ringcraft': 'Focus on movement and pivoting. Control the center of the ring, cut off angles, and maintain balance.',
   'Footwork-Only Round': 'Move for a full round without throwing punches. Stay on the balls of your feet, maintain shoulder-width base, move in all directions.',
   'Heavy bag – power shots': 'Focus on weight transfer and rotation. Sit down on your punches and hit the bag as hard as possible.',
   'Heavy bag – body shots': 'Change levels by bending your knees. Dig hooks and uppercuts into the lower half of the bag.',
@@ -412,46 +458,16 @@ const EXERCISE_INFO = {
   'Heavy bag – Tabata': '15 seconds of maximum-speed punches followed by 15 seconds of active rest (bouncing). Repeat for 8 intervals.',
   'Heavy bag – Technical HIIT': 'Combine explosive bursts with active recovery (footwork/jabs). Maintain perfect technique even when tired.',
   'Heavy bag – Counters': 'Work on defending an attack and immediately replying with an uppercut or hook counter.',
-  'Heavy bag – Power Pyramid': 'Min 1: Single power shots with 1-2s resets. Min 2: Two-punch combos. Min 3: Three to five-punch combos thrown with bad intentions.',
-  'Heavy bag – Level Mixing': 'Alternate head and body shots. Body Jab to Head Cross (7-2), Head Jab to Body Cross to Head Hook (1-2b-3). Bend knees to change levels.',
-  'Heavy bag – Inside Fighting': 'Get close to the bag. Nonstop alternating uppercuts and hooks. Focus on hip rotation and staying grounded. Make it ugly.',
-  'Heavy bag – Speed Tabata': '15s max-speed shoeshine punches, 15s active rest (bouncing). 8 intervals. Focus on fast breathing and fast muscle contractions.',
-  'Heavy bag – 7-Second Drill': '7 seconds hitting the bag as hard and fast as possible, 7 seconds rest. Repeat for the round. Finish with 5 burpees.',
-  'Heavy bag – Endurance': 'Continuous punching at moderate intensity (50-60% power) for the full round. Focus on breathing and maintaining form under fatigue.',
-  'Heavy bag – Feint & Counter': 'Use feints to draw a reaction from the "opponent" (the bag), then slip and fire a sharp counter combination.',
-  'Heavy bag – Check Hooks': 'Practice landing the hook while pivoting 90 degrees as the bag moves towards you; stay balanced.',
-  'Heavy bag – Lead Hook': 'Pivot on the lead foot, rotate the hips and torso as one unit. Elbow stays at 90°, fist parallel to the floor. Snap it back to guard immediately.',
-  'Heavy bag – Rear Hook': 'Step in slightly, pivot on the rear foot and throw the hook from the back hand. Keep the elbow tight and torso rotating. Power comes from the hip.',
-  'Heavy bag – Lead Uppercut': 'Drop your lead knee slightly, drive upward from the legs through the hips. Fist faces you (palm toward your face). Short, compact punch aimed at the chin.',
-  'Heavy bag – Rear Uppercut': 'Bend the rear knee and explode upward, rotating the rear hip forward. Keep the elbow tight, fist rising on a vertical line. Great for close-range power.',
-  'Shadowboxing – Lead Hook': 'Focus purely on the lead hook mechanics. Pivot the front foot, rotate core, keep elbow at 90°. Throw at head height then body height alternately.',
-  'Shadowboxing – Rear Hook': 'Practice the rear hook in isolation. Step in, pivot rear foot, rotate hips. Focus on keeping your guard hand protecting the chin throughout.',
-  'Shadowboxing – Lead Uppercut': 'Drill the lead uppercut in front of a mirror. Dip slightly, drive up from the legs, keep the punch compact. Alternate between head and body targets.',
-  'Shadowboxing – Rear Uppercut': 'Isolate the rear uppercut. Drop the rear knee, explode upward rotating the hip. Immediately return hand to guard. Practice at different speeds.',
-  'Speed target – rapid jabs': 'Keep your non-punching hand glued to your chin. Snap the jab out and back as fast as possible.',
-  'HIIT – 10-punch burst  squat': 'Throw 10 straight punches as fast as possible, then immediately perform 1 bodyweight squat.',
-  'HIIT – Bag & Bodyweight': '45 seconds work, 15 seconds rest: bag combos, burpees, body shots, push-ups, speed punches, high knees. 3 total rounds.',
   'Push-ups': 'Keep a straight line from head to heels. Lower your chest to the floor and press up to full extension.',
   'Push-ups – shoulder taps': 'From push-up position, tap alternate shoulders while keeping hips stable. Builds shoulder stability and core.',
   'Diamond push-ups': 'Place hands close together under your chest forming a diamond shape. Targets the triceps and inner chest.',
   'Bodyweight squats': 'Keep your chest up and back straight. Lower your hips until thighs are parallel to the floor.',
   'Jump squats': 'Explosively jump up from the bottom of the squat position. Land softly and go immediately into the next rep.',
   'Walking lunges': 'Step forward and lower your hips until both knees are bent at a 90-degree angle.',
-  'Lateral skater jumps': 'Jump laterally from foot to foot like a speed skater. Builds the lateral agility needed for pivots and movement.',
   'Burpees': 'Drop to a push-up position, perform a push-up, jump feet back to hands, and explosively jump up with hands overhead.',
   'Plank': 'Hold a straight body position resting on your forearms. Squeeze your core and glutes.',
-  'Side plank': 'Balance on one forearm with body in a straight line. Hold for specified time, then switch sides.',
   'Mountain climbers': 'From a push-up position, rapidly drive your knees alternating toward your chest.',
-  'V-sits': 'Sit balancing on your sit bones. Extend legs and lean back, then bring knees and chest together.',
-  'Russian twists': 'Sit with feet slightly elevated. Twist your torso side to side, touching the floor on each side.',
-  'Hollow body hold': 'Lie on your back, flatten your lower back to the floor, and hover your arms and legs slightly off the ground.',
-  'Bicycle crunches': 'Lie on your back. Alternate bringing your opposite elbow to your knee in a pedaling motion.',
-  'Neck & wrist mobilisation': 'Gently stretch the neck in all directions and rotate the wrists to prepare for impact.',
-  'Torso twists': 'Stand with a wide stance and twist your upper body left and right to loosen the core and spine.',
-  'Dynamic stretching': 'Use movement-based stretches to take joints through their full range of motion.',
   'Cool-down stretch': 'Perform static stretches holding each position for 15-30 seconds to improve flexibility.',
-  'Cool-down shadowboxing': 'Very slow, smooth shadowboxing while consciously slowing your breathing. Light footwork, deep nasal breaths.',
-  'Conditioning – Sprawls': 'Drop into a sprawl (hips to floor, legs back) then quickly recover to your fighting stance.',
 };
 
 function toggleInfo(e, id) {
@@ -479,22 +495,19 @@ const WU_DEF = [
   { name: 'Rest',                            phase: 'rest',     secs: 30,  rounds: 1, detail: '' },
 ];
 const CD_SHORT = [{ name: 'Cool-down stretch', phase: 'cooldown', secs: 180, rounds: 1, detail: 'Full body stretch' }];
-const CD_MED   = [{ name: 'Cool-down stretch', phase: 'cooldown', secs: 240, rounds: 1, detail: 'Full body stretch' }];
-const CD_LONG  = [{ name: 'Cool-down stretch', phase: 'cooldown', secs: 300, rounds: 1, detail: 'Deep recovery stretch' }];
 const REST30   = { name: 'Rest',                phase: 'rest',     secs: 30,  rounds: 1, detail: '' };
 const REST20   = { name: 'Rest',                phase: 'rest',     secs: 20,  rounds: 1, detail: '' };
 const RBTR60   = { name: 'Rest between rounds', phase: 'rest',     secs: 60,  rounds: 1, detail: '' };
 const RBTR45   = { name: 'Rest between rounds', phase: 'rest',     secs: 45,  rounds: 1, detail: '' };
 
 const WORKOUTS_BEG = {
-  // ── DAY A: POWER FOUNDATIONS (50-70% power, form focus) ───────────────────
-  A1: { label: 'Power I',   pill: 'pa', color: '#E24B4A', exercises: [
+  A: { label: 'Day A – Power', pill: 'pa', color: '#E24B4A', exercises: [
     ...WU_STD,
-    { name: 'Shadowboxing – Mirror Drill',  phase: 'boxing',   secs: 120, rounds: 2, detail: 'Check chin, guard height, stance in mirror' },
+    { name: 'Shadowboxing – Mirror Drill',  phase: 'boxing',   secs: 120, rounds: 2, detail: 'Check chin, guard height, stance' },
     RBTR60,
-    { name: 'Shadowboxing – 1-2 basics',    phase: 'boxing',   secs: 120, rounds: 2, detail: 'Jab & Cross only – full extension, exhale each punch' },
+    { name: 'Shadowboxing – 1-2 basics',    phase: 'boxing',   secs: 120, rounds: 2, detail: 'Jab & Cross only – full extension' },
     RBTR60,
-    { name: 'Heavy bag – Round 1',          phase: 'boxing',   secs: 120, rounds: 2, detail: 'Jab only – find your distance at 50% power', noBack: true },
+    { name: 'Heavy bag – Round 1',          phase: 'boxing',   secs: 120, rounds: 2, detail: 'Jab only – find your distance', noBack: true },
     RBTR60,
     { name: 'Push-ups',                     phase: 'strength', secs: 30,  rounds: 2, detail: '8–10 reps' },
     REST30,
@@ -504,41 +517,9 @@ const WORKOUTS_BEG = {
     REST20,
     ...CD_SHORT,
   ]},
-  A2: { label: 'Power II',  pill: 'pa', color: '#E24B4A', exercises: [
-    ...WU_STD,
-    { name: 'Shadowboxing – 1-2 basics',    phase: 'boxing',   secs: 120, rounds: 2, detail: 'Snap the punches, breathe out on every strike' },
-    RBTR60,
-    { name: 'Heavy bag – Round 2',          phase: 'boxing',   secs: 120, rounds: 2, detail: '1-2 combo focus – rotate hips on Cross', noBack: true },
-    RBTR60,
-    { name: 'Diamond push-ups',             phase: 'strength', secs: 30,  rounds: 2, detail: '8 reps, control descent' },
-    REST30,
-    { name: 'Walking lunges',               phase: 'strength', secs: 30,  rounds: 2, detail: '8 each leg' },
-    REST30,
-    { name: 'Mountain climbers',            phase: 'core',     secs: 30,  rounds: 2, detail: 'Moderate pace' },
-    REST20,
-    ...CD_SHORT,
-  ]},
-  A3: { label: 'Power III', pill: 'pa', color: '#E24B4A', exercises: [
-    ...WU_STD,
-    { name: 'Shadowboxing – Lead Hook',     phase: 'boxing',   secs: 90,  rounds: 2, detail: 'Pivot front foot, rotate core, elbow at 90°' },
-    RBTR45,
-    { name: 'Shadowboxing – 1-2-3 combos',  phase: 'boxing',   secs: 120, rounds: 2, detail: 'Add the Lead Hook – pivot your front foot' },
-    RBTR60,
-    { name: 'Heavy bag – Round 3',          phase: 'boxing',   secs: 120, rounds: 2, detail: '1-2-3 combo at 60% power', noBack: true },
-    RBTR60,
-    { name: 'Push-ups',                     phase: 'strength', secs: 30,  rounds: 2, detail: '10 reps' },
-    REST30,
-    { name: 'Bodyweight squats',            phase: 'strength', secs: 30,  rounds: 2, detail: '12 reps' },
-    REST30,
-    { name: 'Hollow body hold',             phase: 'core',     secs: 25,  rounds: 2, detail: 'Lower back flat' },
-    REST20,
-    ...CD_SHORT,
-  ]},
-
-  // ── DAY B: SPEED & DEFENCE (footwork first, then head movement) ──────────
-  B1: { label: 'Speed I',   pill: 'pb', color: '#185FA5', exercises: [
+  B: { label: 'Day B – Speed', pill: 'pb', color: '#378ADD', exercises: [
     ...WU_SB,
-    { name: 'Footwork-Only Round',           phase: 'boxing',   secs: 120, rounds: 2, detail: 'No punches – move in all directions, stay on toes' },
+    { name: 'Footwork-Only Round',           phase: 'boxing',   secs: 120, rounds: 2, detail: 'Stay on toes, move in all directions' },
     RBTR60,
     { name: 'Shadowboxing – slips and rolls', phase: 'boxing',  secs: 90,  rounds: 2, detail: 'Slow, exaggerated head movement' },
     RBTR60,
@@ -548,456 +529,137 @@ const WORKOUTS_BEG = {
     REST20,
     ...CD_SHORT,
   ]},
-  B2: { label: 'Speed II',  pill: 'pb', color: '#185FA5', exercises: [
-    ...WU_SB,
-    { name: 'Speed target – rapid jabs',     phase: 'boxing',   secs: 90,  rounds: 2, detail: 'Max hand speed – hand back to chin each time' },
-    RBTR45,
-    { name: 'Shadowboxing – defensive',      phase: 'boxing',   secs: 90,  rounds: 2, detail: 'Guard & counter only – no leading' },
-    RBTR60,
-    { name: 'Push-ups',                      phase: 'strength', secs: 30,  rounds: 2, detail: '10 reps' },
-    REST30,
-    { name: 'Russian twists',                phase: 'core',     secs: 30,  rounds: 2, detail: 'Controlled rotation', noBack: true },
-    REST20,
-    ...CD_SHORT,
-  ]},
-  B3: { label: 'Speed III', pill: 'pb', color: '#185FA5', exercises: [
+  C: { label: 'Day C – Conditioning', pill: 'pc', color: '#639922', exercises: [
     ...WU_DEF,
-    { name: 'Footwork-Only Round',           phase: 'boxing',   secs: 90,  rounds: 2, detail: 'Pivot practice – step and drag, never cross feet' },
-    RBTR45,
-    { name: 'Shadowboxing – 1-2-3 combos',  phase: 'boxing',   secs: 120, rounds: 2, detail: 'Combo then slip – defensive integration' },
-    RBTR60,
-    { name: 'Bodyweight squats',             phase: 'strength', secs: 30,  rounds: 2, detail: '12 reps' },
-    REST30,
-    { name: 'Plank',                         phase: 'core',     secs: 30,  rounds: 2, detail: 'Brace everything' },
-    REST20,
-    ...CD_SHORT,
-  ]},
-
-  // ── DAY C: CONDITIONING (bag work + bodyweight) ───────────────────────────
-  C1: { label: 'Conditioning I',   pill: 'pc', color: '#639922', exercises: [
-    ...WU_DEF,
-    { name: 'Heavy bag – body shots',       phase: 'boxing',   secs: 120, rounds: 2, detail: 'Bend knees to change level – hooks to body' },
+    { name: 'Heavy bag – body shots',       phase: 'boxing',   secs: 120, rounds: 2, detail: 'Bend knees to change level' },
     RBTR60,
     { name: 'Shadowboxing – defensive',     phase: 'boxing',   secs: 120, rounds: 2, detail: 'Guard & counter only' },
     RBTR60,
     { name: 'Bodyweight squats',            phase: 'strength', secs: 30,  rounds: 2, detail: '10 reps' },
     REST30,
-    { name: 'Hollow body hold',             phase: 'core',     secs: 25,  rounds: 2, detail: 'Lower back flat to floor' },
+    { name: 'Plank',                        phase: 'core',     secs: 30,  rounds: 2, detail: 'Solid core' },
     REST20,
     ...CD_SHORT,
   ]},
-  C2: { label: 'Conditioning II',  pill: 'pc', color: '#639922', exercises: [
-    ...WU_STD,
-    { name: 'Heavy bag – Endurance',        phase: 'boxing',   secs: 120, rounds: 2, detail: '50-60% power – focus on breathing rhythm', noBack: true },
+  D: { label: 'Day D – Ringcraft', pill: 'pd', color: '#FAC775', exercises: [
+    ...WU_DEF,
+    { name: 'Shadowboxing – footwork',      phase: 'boxing',   secs: 120, rounds: 2, detail: 'Focus on angles & pivots' },
     RBTR60,
-    { name: 'Shadowboxing  footwork',       phase: 'boxing',   secs: 90,  rounds: 2, detail: 'Angle changes, stay light on feet' },
+    { name: 'Heavy bag – Check Hooks',      phase: 'boxing',   secs: 120, rounds: 2, detail: 'Pivot 90 deg while landing hook' },
     RBTR60,
-    { name: 'Walking lunges',               phase: 'strength', secs: 30,  rounds: 2, detail: '8 each leg' },
+    { name: 'Conditioning – Sprawls',       phase: 'strength', secs: 30,  rounds: 2, detail: 'Max speed sprawls' },
     REST30,
-    { name: 'Mountain climbers',            phase: 'core',     secs: 30,  rounds: 2, detail: 'Moderate pace' },
-    REST20,
-    ...CD_SHORT,
-  ]},
-  C3: { label: 'Conditioning III', pill: 'pc', color: '#639922', exercises: [
-    ...WU_SB,
-    { name: 'Heavy bag – body shots',       phase: 'boxing',   secs: 120, rounds: 2, detail: 'Liver shots & solar plexus' },
-    RBTR60,
-    { name: 'Heavy bag – Round 2',          phase: 'boxing',   secs: 120, rounds: 2, detail: '1-2 for power at 70%', noBack: true },
-    RBTR60,
-    { name: 'Push-ups',                     phase: 'strength', secs: 30,  rounds: 2, detail: '10 reps' },
-    REST30,
-    { name: 'Bicycle crunches',             phase: 'core',     secs: 30,  rounds: 2, detail: 'Full rotation' },
-    REST20,
-    ...CD_SHORT,
-  ]},
-  D: { label: 'Fundamentals', pill: 'pc', color: '#888780', exercises: [
-    ...WU_STD,
-    { name: 'Shadowboxing – Mirror Drill',  phase: 'boxing',   secs: 120, rounds: 2, detail: 'Stance check – chin tucked, guard up, balanced' },
-    RBTR60,
-    { name: 'Shadowboxing – Lead Hook',     phase: 'boxing',   secs: 90,  rounds: 2, detail: 'Isolate the hook – pivot front foot, rotate core' },
-    RBTR45,
-    { name: 'Shadowboxing – Lead Uppercut', phase: 'boxing',   secs: 90,  rounds: 2, detail: 'Dip slightly, drive up from legs, keep it compact' },
-    RBTR60,
-    { name: 'Heavy bag – Round 1',          phase: 'boxing',   secs: 120, rounds: 2, detail: 'Jab focus – full extension, snap back', noBack: true },
-    RBTR60,
-    { name: 'Push-ups',                     phase: 'strength', secs: 30,  rounds: 2, detail: '8 reps' },
-    REST30,
-    { name: 'Plank',                        phase: 'core',     secs: 30,  rounds: 2, detail: 'Core braced' },
-    REST20,
-    ...CD_SHORT,
-  ]},
+    ...CD_SHORT
+  ]}
 };
-Object.assign(WORKOUTS_BEG, { A: WORKOUTS_BEG.A1, B: WORKOUTS_BEG.B1, C: WORKOUTS_BEG.C1 });
 
 const WORKOUTS_INT = {
-  // ── DAY A: POWER (80% power, combination building) ────────────────────────
-  A1: { label: 'Power I',   pill: 'pa', color: '#E24B4A', exercises: [
+  A: { label: 'Day A – Power', pill: 'pa', color: '#E24B4A', exercises: [
     ...WU_STD,
-    { name: 'Shadowboxing – 1-2-3 combos', phase: 'boxing',   secs: 180, rounds: 3, detail: 'L-Jab, R-Cross, L-Hook – full rotation' },
+    { name: 'Shadowboxing – 1-2-3 combos',  phase: 'boxing',   secs: 180, rounds: 3, detail: 'Rotate through power punches' },
     RBTR60,
-    { name: 'Heavy bag – Lead Hook',       phase: 'boxing',   secs: 120, rounds: 3, detail: 'Isolate the 3 – pivot, rotate, snap back to guard', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – Power Pyramid',   phase: 'boxing',   secs: 180, rounds: 3, detail: 'Single shots → 2-punch → 3-punch combos', noBack: true },
+    { name: 'Heavy bag – Round 2',          phase: 'boxing',   secs: 180, rounds: 3, detail: '1-2-3 combos with bad intentions', noBack: true },
     RBTR60,
-    { name: 'Push-ups',                    phase: 'strength', secs: 45,  rounds: 3, detail: '12–15 reps' },
+    { name: 'Push-ups – shoulder taps',     phase: 'strength', secs: 45,  rounds: 3, detail: '12-15 reps' },
     REST30,
-    { name: 'Bodyweight squats',           phase: 'strength', secs: 45,  rounds: 3, detail: '15 reps – drive from the ground' },
+    { name: 'Jump squats',                  phase: 'strength', secs: 45,  rounds: 3, detail: 'Explosive power' },
     REST30,
-    { name: 'Plank',                       phase: 'core',     secs: 45,  rounds: 3, detail: 'Tight core' },
-    REST30,
-    { name: 'Mountain climbers',           phase: 'core',     secs: 40,  rounds: 2, detail: 'Fast knees' },
+    { name: 'Russian twists',               phase: 'core',     secs: 45,  rounds: 3, detail: 'Rotational power', noBack: true },
     REST20,
-    ...CD_MED,
+    ...CD_SHORT
   ]},
-  A2: { label: 'Power II',  pill: 'pa', color: '#E24B4A', exercises: [
-    ...WU_STD,
-    { name: 'Heavy bag – Lead Uppercut',   phase: 'boxing',   secs: 120, rounds: 3, detail: 'Dip, drive up from legs – compact punch to chin', noBack: true },
-    RBTR45,
-    { name: 'Shadowboxing – Combo Stacking', phase: 'boxing',  secs: 180, rounds: 3, detail: 'Build from 1-2 to 5-punch sequences' },
-    RBTR60,
-    { name: 'Heavy bag – Level Mixing',    phase: 'boxing',   secs: 180, rounds: 3, detail: 'Head-body-head: 1-2b-3, 7-2', noBack: true },
-    RBTR60,
-    { name: 'Diamond push-ups',            phase: 'strength', secs: 45,  rounds: 3, detail: '10–12 reps' },
-    REST30,
-    { name: 'Jump squats',                 phase: 'strength', secs: 40,  rounds: 3, detail: 'Explosive, land soft', noBack: true },
-    REST30,
-    { name: 'Hollow body hold',            phase: 'core',     secs: 40,  rounds: 3, detail: 'Lower back pressed down' },
-    REST20,
-    ...CD_MED,
-  ]},
-  A3: { label: 'Power III', pill: 'pa', color: '#E24B4A', exercises: [
-    ...WU_STD,
-    { name: 'Heavy bag – Rear Hook',       phase: 'boxing',   secs: 120, rounds: 3, detail: 'Step in, pivot rear foot, rotate hips – keep elbow tight', noBack: true },
-    RBTR45,
-    { name: 'Shadowboxing – Ghost Sparring', phase: 'boxing',  secs: 180, rounds: 3, detail: 'Visualize a taller opponent – manage distance' },
-    RBTR60,
-    { name: 'Heavy bag – Def. Counters',   phase: 'boxing',   secs: 180, rounds: 3, detail: 'Slip then fire counter at 80% power', noBack: true },
-    RBTR60,
-    { name: 'Push-ups',                    phase: 'strength', secs: 45,  rounds: 3, detail: '15 reps' },
-    REST30,
-    { name: 'Walking lunges',              phase: 'strength', secs: 45,  rounds: 3, detail: '12 each leg' },
-    REST30,
-    { name: 'Russian twists',              phase: 'core',     secs: 40,  rounds: 3, detail: 'Rotate fully each side', noBack: true },
-    REST20,
-    ...CD_MED,
-  ]},
-
-  // ── DAY B: SPEED (head movement, counter-punching) ────────────────────────
-  B1: { label: 'Speed I',   pill: 'pb', color: '#185FA5', exercises: [
+  B: { label: 'Day B – Speed', pill: 'pb', color: '#378ADD', exercises: [
     ...WU_SB,
-    { name: 'Speed target – rapid jabs',    phase: 'boxing',   secs: 120, rounds: 4, detail: 'Max hand speed – snap back to chin' },
+    { name: 'Speed target – rapid jabs',    phase: 'boxing',   secs: 120, rounds: 3, detail: 'Max hand speed' },
     RBTR45,
-    { name: 'Shadowboxing – full combos',   phase: 'boxing',   secs: 180, rounds: 3, detail: '3-5 punch sequences with slips' },
+    { name: 'Shadowboxing – full speed',    phase: 'boxing',   secs: 180, rounds: 3, detail: 'High pace combinations' },
     RBTR60,
-    { name: 'Burpees',                      phase: 'strength', secs: 40,  rounds: 3, detail: '8–10 reps, explosive', noBack: true },
+    { name: 'Diamond push-ups',             phase: 'strength', secs: 45,  rounds: 3, detail: 'Tricep endurance' },
     REST30,
-    { name: 'Walking lunges',               phase: 'strength', secs: 45,  rounds: 3, detail: '12 each leg' },
-    REST30,
-    { name: 'V-sits',                       phase: 'core',     secs: 40,  rounds: 3, detail: '15 reps controlled', noBack: true },
+    { name: 'Mountain climbers',            phase: 'core',     secs: 45,  rounds: 3, detail: 'Sprint pace' },
     REST20,
-    ...CD_MED,
+    ...CD_SHORT
   ]},
-  B2: { label: 'Speed II',  pill: 'pb', color: '#185FA5', exercises: [
-    ...WU_SB,
-    { name: 'Shadowboxing – slips and rolls', phase: 'boxing', secs: 120, rounds: 3, detail: 'Fast, crisp head movement – then counter' },
-    RBTR60,
-    { name: 'Shadowboxing – Ghost Sparring', phase: 'boxing',  secs: 180, rounds: 3, detail: 'Aggressive opponent – use footwork to evade' },
-    RBTR60,
-    { name: 'Jump squats',                  phase: 'strength', secs: 40,  rounds: 3, detail: 'Explosive, land soft', noBack: true },
-    REST30,
-    { name: 'Russian twists',               phase: 'core',     secs: 40,  rounds: 3, detail: 'Rotate fully each side', noBack: true },
-    REST20,
-    ...CD_MED,
-  ]},
-  B3: { label: 'Speed III', pill: 'pb', color: '#185FA5', exercises: [
+  C: { label: 'Day C – Conditioning', pill: 'pc', color: '#639922', exercises: [
     ...WU_DEF,
-    { name: 'Speed target – rapid jabs',    phase: 'boxing',   secs: 120, rounds: 3, detail: 'Burst speed on L-Jab' },
-    RBTR45,
-    { name: 'Shadowboxing – defensive',     phase: 'boxing',   secs: 180, rounds: 3, detail: 'Guard, slip, counter – never stand still' },
+    { name: 'HIIT – 10-punch burst  squat', phase: 'boxing',   secs: 180, rounds: 3, detail: 'Punch flurry then squat' },
     RBTR60,
-    { name: 'Burpees',                      phase: 'strength', secs: 40,  rounds: 3, detail: '8 reps', noBack: true },
+    { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 180, rounds: 3, detail: 'Continuous volume', noBack: true },
+    RBTR60,
+    { name: 'Burpees',                      phase: 'strength', secs: 45,  rounds: 3, detail: 'Max heart rate' },
     REST30,
-    { name: 'Bicycle crunches',             phase: 'core',     secs: 45,  rounds: 3, detail: 'Slow and controlled' },
+    { name: 'Plank',                        phase: 'core',     secs: 60,  rounds: 2, detail: 'Brace hard' },
     REST20,
-    ...CD_MED,
+    ...CD_SHORT
   ]},
-
-  // ── DAY C: CONDITIONING (HIIT, inside fighting) ───────────────────────────
-  C1: { label: 'Conditioning I',   pill: 'pc', color: '#639922', exercises: [
+  D: { label: 'Day D – Ringcraft', pill: 'pd', color: '#FAC775', exercises: [
     ...WU_DEF,
-    { name: 'HIIT – 10-punch burst  squat', phase: 'boxing',   secs: 180, rounds: 4, detail: '10 alternating punches then squat', noBack: true },
+    { name: 'Shadowboxing – full combos',   phase: 'boxing',   secs: 180, rounds: 3, detail: 'Pivots and level changes' },
     RBTR60,
-    { name: 'Heavy bag – Inside Fighting', phase: 'boxing',   secs: 180, rounds: 3, detail: 'Close range – uppercuts & hooks, stay grounded', noBack: true },
+    { name: 'Heavy bag – Feint & Counter',  phase: 'boxing',   secs: 180, rounds: 3, detail: 'Deceptive entry, then counter' },
     RBTR60,
-    { name: 'Diamond push-ups',             phase: 'strength', secs: 45,  rounds: 3, detail: '10–12 reps' },
+    { name: 'Jump squats',                  phase: 'strength', secs: 45,  rounds: 3, detail: 'Explosive legs' },
     REST30,
-    { name: 'Jump squats',                  phase: 'strength', secs: 40,  rounds: 3, detail: 'Explosive, land soft', noBack: true },
-    REST30,
-    { name: 'Hollow body hold',             phase: 'core',     secs: 40,  rounds: 3, detail: 'Lower back pressed down' },
-    REST20,
-    ...CD_LONG,
-  ]},
-  C2: { label: 'Conditioning II',  pill: 'pc', color: '#639922', exercises: [
-    ...WU_SB,
-    { name: 'Heavy bag – Counters',         phase: 'boxing',   secs: 180, rounds: 3, detail: 'Catch and reply combo', noBack: true },
-    RBTR60,
-    { name: 'Shadowboxing – Brain Training', phase: 'boxing',  secs: 180, rounds: 3, detail: 'Different 3-punch combo every time' },
-    RBTR60,
-    { name: 'Burpees',                      phase: 'strength', secs: 40,  rounds: 3, detail: '8 reps', noBack: true },
-    REST30,
-    { name: 'Bicycle crunches',             phase: 'core',     secs: 45,  rounds: 3, detail: 'Slow and controlled' },
-    REST20,
-    { name: 'Cool-down shadowboxing',       phase: 'cooldown', secs: 180, rounds: 1, detail: 'Slow, smooth, deep nasal breathing' },
-    ...CD_LONG,
-  ]},
-  C3: { label: 'Conditioning III', pill: 'pc', color: '#639922', exercises: [
-    ...WU_STD,
-    { name: 'Heavy bag – Body Snatcher',    phase: 'boxing',   secs: 180, rounds: 3, detail: 'Jab, body hook, overhand', noBack: true },
-    RBTR60,
-    { name: 'Heavy bag – power shots',      phase: 'boxing',   secs: 180, rounds: 3, detail: 'Max power rotation at 80%', noBack: true },
-    RBTR60,
-    { name: 'Jump squats',                  phase: 'strength', secs: 40,  rounds: 3, detail: 'Max explosion', noBack: true },
-    REST30,
-    { name: 'Russian twists',               phase: 'core',     secs: 40,  rounds: 3, detail: 'Full rotation', noBack: true },
-    REST20,
-    ...CD_LONG,
-  ]},
-  D: { label: 'Ringcraft', pill: 'pc', color: '#888780', exercises: [
-    ...WU_SB,
-    { name: 'Shadowboxing – ringcraft',     phase: 'boxing',   secs: 180, rounds: 3, detail: 'Centre control, cut off angles, pivot' },
-    RBTR60,
-    { name: 'Heavy bag – Feint & Counter',  phase: 'boxing',   secs: 180, rounds: 3, detail: 'Sell the feint, then counter', noBack: true },
-    RBTR60,
-    { name: 'Heavy bag – Check Hooks',      phase: 'boxing',   secs: 180, rounds: 3, detail: 'Pivot 90° while landing hook', noBack: true },
-    RBTR60,
-    { name: 'Conditioning – Sprawls',       phase: 'strength', secs: 45,  rounds: 3, detail: 'Max speed sprawls' },
-    REST30,
-    { name: 'Plank',                        phase: 'core',     secs: 60,  rounds: 3, detail: 'Maintain total tension' },
-    REST20,
-    ...CD_LONG,
-  ]},
+    ...CD_SHORT
+  ]}
 };
-Object.assign(WORKOUTS_INT, { A: WORKOUTS_INT.A1, B: WORKOUTS_INT.B1, C: WORKOUTS_INT.C1 });
-
-const REST25 = { name: 'Rest', phase: 'rest', secs: 25, rounds: 1, detail: '' };
 
 const WORKOUTS_ADV = {
-  // ── DAY A: MAX POWER (100% fight pace, high volume) ──────────────────────
-  A1: { label: 'Power I',   pill: 'pa', color: '#E24B4A', exercises: [
+  A: { label: 'Day A – Power', pill: 'pa', color: '#E24B4A', exercises: [
     ...WU_STD,
-    { name: 'Shadowboxing – full speed',   phase: 'boxing',   secs: 180, rounds: 4, detail: 'Fight pace with defensive movement' },
+    { name: 'Shadowboxing – full combos',   phase: 'boxing',   secs: 180, rounds: 4, detail: 'Max velocity' },
     RBTR45,
-    { name: 'Heavy bag – Lead Hook',       phase: 'boxing',   secs: 120, rounds: 4, detail: 'Max power hooks – full hip rotation, sit down on it', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – Power Pyramid',   phase: 'boxing',   secs: 180, rounds: 5, detail: '1-shot → 2-punch → 5-punch flurries at max power', noBack: true },
-    RBTR45,
-    { name: 'Diamond push-ups',            phase: 'strength', secs: 45,  rounds: 4, detail: '15+ reps' },
-    REST25,
-    { name: 'Jump squats',                 phase: 'strength', secs: 40,  rounds: 4, detail: 'Max height, land soft', noBack: true },
-    REST25,
-    { name: 'Plank',                       phase: 'core',     secs: 60,  rounds: 4, detail: 'Total-body tension' },
-    REST20,
-    { name: 'Mountain climbers',           phase: 'core',     secs: 45,  rounds: 3, detail: 'Sprint pace' },
-    REST20,
-    ...CD_LONG,
-  ]},
-  A2: { label: 'Power II',  pill: 'pa', color: '#E24B4A', exercises: [
-    ...WU_STD,
-    { name: 'Shadowboxing – Brain Training', phase: 'boxing',  secs: 180, rounds: 4, detail: 'Different combo every time – no repeats' },
-    RBTR45,
-    { name: 'Heavy bag – Rear Uppercut',   phase: 'boxing',   secs: 120, rounds: 4, detail: 'Bend rear knee, explode upward – max power on every rep', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – Burnout',         phase: 'boxing',   secs: 120, rounds: 4, detail: 'Non-stop 1-2s, max speed', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – Inside Fighting', phase: 'boxing',   secs: 180, rounds: 3, detail: 'Close range – uppercuts, hooks, hip rotation', noBack: true },
-    RBTR45,
-    { name: 'Push-ups – shoulder taps',    phase: 'strength', secs: 45,  rounds: 4, detail: '20 reps' },
-    REST25,
-    { name: 'Bodyweight squats',           phase: 'strength', secs: 45,  rounds: 4, detail: '20 reps, explosive' },
-    REST25,
-    { name: 'V-sits',                      phase: 'core',     secs: 45,  rounds: 4, detail: 'Controlled', noBack: true },
-    REST20,
-    ...CD_LONG,
-  ]},
-  A3: { label: 'Power III', pill: 'pa', color: '#E24B4A', exercises: [
-    ...WU_STD,
-    { name: 'Heavy bag – Rear Hook',       phase: 'boxing',   secs: 120, rounds: 4, detail: 'Step in, pivot rear foot – devastating power hook', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – Lead Uppercut',   phase: 'boxing',   secs: 120, rounds: 4, detail: 'Dip and drive – palm facing you, tight and compact', noBack: true },
-    RBTR45,
-    { name: 'Shadowboxing – full combos',  phase: 'boxing',   secs: 180, rounds: 4, detail: '5+ punch combos with feints & level changes' },
-    RBTR45,
-    { name: 'Heavy bag – 7-Second Drill',  phase: 'boxing',   secs: 180, rounds: 4, detail: '7s all-out → 7s rest → repeat. 5 burpees to finish', noBack: true },
-    RBTR45,
-    { name: 'Diamond push-ups',            phase: 'strength', secs: 45,  rounds: 4, detail: '15 reps, explosive' },
-    REST25,
-    { name: 'Walking lunges',              phase: 'strength', secs: 45,  rounds: 4, detail: '16 each leg' },
-    REST25,
-    { name: 'Russian twists',              phase: 'core',     secs: 45,  rounds: 4, detail: 'Max rotation', noBack: true },
-    REST20,
-    ...CD_LONG,
-  ]},
-
-  // ── DAY B: SPEED & REFLEXES (Tabata, counter-punching mastery) ────────────
-  B1: { label: 'Speed I',   pill: 'pb', color: '#185FA5', exercises: [
-    ...WU_SB,
-    { name: 'Speed target – rapid jabs',      phase: 'boxing',   secs: 120, rounds: 5, detail: 'Burst speed, max hand speed' },
-    RBTR45,
-    { name: 'Shadowboxing – full speed',      phase: 'boxing',   secs: 180, rounds: 4, detail: 'Fight simulation – no breaks' },
-    RBTR45,
-    { name: 'Heavy bag – Speed Tabata',       phase: 'boxing',   secs: 180, rounds: 3, detail: '15s max-speed shoeshine → 15s active rest', noBack: true },
-    RBTR45,
-    { name: 'Burpees',                        phase: 'strength', secs: 45,  rounds: 4, detail: '12+ reps', noBack: true },
-    REST25,
-    { name: 'V-sits',                         phase: 'core',     secs: 45,  rounds: 4, detail: 'Controlled slow reps', noBack: true },
-    REST20,
-    ...CD_LONG,
-  ]},
-  B2: { label: 'Speed II',  pill: 'pb', color: '#185FA5', exercises: [
-    ...WU_DEF,
-    { name: 'Speed target – rapid jabs',      phase: 'boxing',   secs: 120, rounds: 4, detail: 'Max hand speed' },
-    RBTR45,
-    { name: 'Shadowboxing – Ghost Sparring',  phase: 'boxing',   secs: 180, rounds: 4, detail: 'Southpaw opponent – adjust angles & distance' },
-    RBTR45,
-    { name: 'Heavy bag – Def. Counters',      phase: 'boxing',   secs: 180, rounds: 3, detail: 'Slip → fire fast combo at 100%', noBack: true },
-    RBTR45,
-    { name: 'Lateral skater jumps',           phase: 'strength', secs: 45,  rounds: 4, detail: 'Build lateral agility for pivots', noBack: true },
-    REST25,
-    { name: 'Russian twists',                 phase: 'core',     secs: 45,  rounds: 4, detail: 'Full rotation speed', noBack: true },
-    REST20,
-    ...CD_LONG,
-  ]},
-  B3: { label: 'Speed III', pill: 'pb', color: '#185FA5', exercises: [
-    ...WU_SB,
-    { name: 'Shadowboxing – defensive',       phase: 'boxing',   secs: 180, rounds: 3, detail: 'Guard, slip, pivot, angled escape' },
-    RBTR45,
-    { name: 'Heavy bag – Counters',           phase: 'boxing',   secs: 180, rounds: 4, detail: 'Catch and reply – immediate counter', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – Check Hooks',        phase: 'boxing',   secs: 180, rounds: 3, detail: '90° pivot while landing hook', noBack: true },
-    RBTR45,
-    { name: 'Walking lunges',                 phase: 'strength', secs: 45,  rounds: 4, detail: '16 each leg' },
-    REST25,
-    { name: 'Bicycle crunches',               phase: 'core',     secs: 45,  rounds: 4, detail: 'Full rotation, controlled' },
-    REST20,
-    ...CD_LONG,
-  ]},
-
-  // ── DAY C: ELITE CONDITIONING (Marathon Man, Tabata, circuits) ────────────
-  C1: { label: 'Conditioning I',   pill: 'pc', color: '#639922', exercises: [
-    ...WU_DEF,
-    { name: 'Heavy bag – Endurance',          phase: 'boxing',   secs: 600, rounds: 1, detail: 'MARATHON ROUND – 10 min continuous at 50-60% power', noBack: true },
+    { name: 'Heavy bag – Power Pyramid',    phase: 'boxing',   secs: 180, rounds: 4, detail: 'Heavy impact', noBack: true },
     RBTR60,
-    { name: 'Heavy bag – Burnout',            phase: 'boxing',   secs: 180, rounds: 3, detail: 'Post-marathon finisher – increasing 60%→70%→80%', noBack: true },
-    RBTR45,
-    { name: 'Diamond push-ups',               phase: 'strength', secs: 45,  rounds: 4, detail: '15 reps' },
+    { name: 'Diamond push-ups',             phase: 'strength', secs: 60,  rounds: 3, detail: 'Max reps' },
+    REST30,
+    { name: 'Jump squats',                  phase: 'strength', secs: 60,  rounds: 3, detail: 'Explosive power' },
+    REST30,
+    { name: 'Plank',                        phase: 'core',     secs: 90,  rounds: 2, detail: 'Total body tension' },
     REST20,
-    { name: 'Jump squats',                    phase: 'strength', secs: 45,  rounds: 4, detail: 'Maximum height', noBack: true },
-    REST20,
-    { name: 'Hollow body hold',               phase: 'core',     secs: 45,  rounds: 4, detail: 'Perfect position, no sag' },
-    REST20,
-    ...CD_LONG,
+    ...CD_SHORT
   ]},
-  C2: { label: 'Conditioning II',  pill: 'pc', color: '#639922', exercises: [
-    ...WU_STD,
-    { name: 'Heavy bag – Tabata',             phase: 'boxing',   secs: 240, rounds: 4, detail: '15s all-out shoeshine → 15s active rest', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – body shots',         phase: 'boxing',   secs: 180, rounds: 4, detail: 'Shark attack – liver & solar plexus' },
-    RBTR45,
-    { name: 'Jump squats',                    phase: 'strength', secs: 45,  rounds: 4, detail: 'Max height', noBack: true },
-    REST20,
-    { name: 'Side plank',                     phase: 'core',     secs: 45,  rounds: 4, detail: 'Each side – total body stability' },
-    REST20,
-    { name: 'Cool-down shadowboxing',         phase: 'cooldown', secs: 180, rounds: 1, detail: 'Slow rhythm, deep nasal breathing' },
-    ...CD_LONG,
-  ]},
-  C3: { label: 'Conditioning III', pill: 'pc', color: '#639922', exercises: [
+  B: { label: 'Day B – Speed', pill: 'pb', color: '#378ADD', exercises: [
     ...WU_SB,
-    { name: 'HIIT – 10-punch burst  squat',   phase: 'boxing',   secs: 180, rounds: 5, detail: 'Max output, 10-punch sprint + squat', noBack: true },
+    { name: 'Speed target – rapid jabs',    phase: 'boxing',   secs: 180, rounds: 4, detail: 'Nonstop hand speed' },
     RBTR45,
-    { name: 'Heavy bag – Technical HIIT',     phase: 'boxing',   secs: 180, rounds: 4, detail: 'Explosive technique bursts', noBack: true },
+    { name: 'Shadowboxing – full speed',    phase: 'boxing',   secs: 180, rounds: 4, detail: 'Pro sparring pace' },
     RBTR45,
-    { name: 'Burpees',                        phase: 'strength', secs: 45,  rounds: 4, detail: '12+ reps', noBack: true },
+    { name: 'Burpees',                      phase: 'strength', secs: 60,  rounds: 3, detail: 'Sprint pace' },
+    REST30,
+    { name: 'Mountain climbers',            phase: 'core',     secs: 60,  rounds: 3, detail: 'Fast knees' },
     REST20,
-    { name: 'Russian twists',                 phase: 'core',     secs: 45,  rounds: 4, detail: 'Max speed rotation', noBack: true },
-    REST20,
-    ...CD_LONG,
+    ...CD_SHORT
   ]},
-  D: { label: 'Elite Ringcraft', pill: 'pc', color: '#888780', exercises: [
+  C: { label: 'Day C – Conditioning', pill: 'pc', color: '#639922', exercises: [
     ...WU_DEF,
-    { name: 'Shadowboxing – ringcraft',       phase: 'boxing',   secs: 180, rounds: 4, detail: 'Centre control + pivots + feints' },
+    { name: 'Heavy bag – Tabata',           phase: 'boxing',   secs: 240, rounds: 4, detail: 'Interval sprints', noBack: true },
     RBTR45,
-    { name: 'Heavy bag – Feint & Counter',    phase: 'boxing',   secs: 180, rounds: 4, detail: 'Sell the feint, explode on counter', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – Inside Fighting',    phase: 'boxing',   secs: 180, rounds: 4, detail: 'Same-side combos: 3-5-3, alternating hooks & uppers', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – Def. Counters',      phase: 'boxing',   secs: 180, rounds: 3, detail: 'Slip → fire fast combo at max power', noBack: true },
-    RBTR45,
-    { name: 'Conditioning – Sprawls',         phase: 'strength', secs: 45,  rounds: 4, detail: 'Explosive sprawl recovery' },
-    REST20,
-    { name: 'Plank',                          phase: 'core',     secs: 60,  rounds: 4, detail: 'Total body tension' },
-    REST20,
-    ...CD_LONG,
+    { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 180, rounds: 3, detail: 'No mercy', noBack: true },
+    RBTR60,
+    { name: 'Burpees',                      phase: 'strength', secs: 60,  rounds: 3, detail: 'Empty the tank' },
+    REST30,
+    { name: 'Plank',                        phase: 'core',     secs: 90,  rounds: 2, detail: 'Mental toughness' },
+    ...CD_SHORT
   ]},
+  D: { label: 'Day D – Ringcraft', pill: 'pd', color: '#FAC775', exercises: [
+    ...WU_DEF,
+    { name: 'Shadowboxing – full combos',   phase: 'boxing',   secs: 180, rounds: 4, detail: 'Championship tempo' },
+    RBTR45,
+    { name: 'Heavy bag – Def. Counters',    phase: 'boxing',   secs: 180, rounds: 4, detail: 'Slip and Counter', noBack: true },
+    RBTR45,
+    { name: 'Conditioning – Sprawls',       phase: 'strength', secs: 60,  rounds: 3, detail: 'Max speed' },
+    REST30,
+    ...CD_SHORT
+  ]}
 };
-Object.assign(WORKOUTS_ADV, { A: WORKOUTS_ADV.A1, B: WORKOUTS_ADV.B1, C: WORKOUTS_ADV.C1 });
 
-
-
-const WORKOUTS_MAP = { beginner: WORKOUTS_BEG, intermediate: WORKOUTS_INT, advanced: WORKOUTS_ADV };
-
-function getWeekOfProgram(date) {
-  const start = new Date(programStartDate);
-  const diff = date.getTime() - start.getTime();
-  if (diff < 0) return 0;
-  return Math.floor(diff / (1000 * 60 * 60 * 24 * 7)) + 1;
-}
-
-function getWorkoutsForDateRange(date) {
-  const week = getWeekOfProgram(date);
-  const userId = activeUserId;
-  
-  if (userId === '1') { // 1Yr B->A
-    if (week <= 16) return WORKOUTS_BEG;
-    if (week <= 32) return WORKOUTS_INT;
-    return WORKOUTS_ADV;
-  }
-  if (userId === '2') { // 6Mo B->A
-    if (week <= 8) return WORKOUTS_BEG;
-    if (week <= 16) return WORKOUTS_INT;
-    return WORKOUTS_ADV;
-  }
-  if (userId === '3') { // 6Mo B->I
-    if (week <= 12) return WORKOUTS_BEG;
-    return WORKOUTS_INT;
-  }
-  if (userId === '4') { // 6Mo I->A
-    if (week <= 12) return WORKOUTS_INT;
-    return WORKOUTS_ADV;
-  }
-  
-  // Default to static fitness level if no user program
-  const level = localStorage.getItem('fitnessLevel') || 'intermediate';
-  return WORKOUTS_MAP[level] || WORKOUTS_INT;
-}
-
-function getWorkouts() {
-  // If we are looking at a specific calendar date, we should ideally pass that.
-  // But for the "Workouts" tab (current training), we use today's level.
-  return getWorkoutsForDateRange(new Date());
-}
-
-
-/* ── HEAVY BAG WORKOUTS ── */
 const HB_WUP = [
-  { name: 'Jump rope',                    phase: 'warmup',   secs: 180, rounds: 1, detail: 'Light pace' },
-  { name: 'Arm circles  shoulder rolls',  phase: 'warmup',   secs: 60,  rounds: 1, detail: 'Full ROM' },
-  { name: 'Hip rotations  leg swings',    phase: 'warmup',   secs: 60,  rounds: 1, detail: 'Dynamic mobility' },
-  { name: 'Shadowboxing  footwork',       phase: 'warmup',   secs: 120, rounds: 1, detail: 'Move & pivot' },
-  { name: 'Rest',                         phase: 'rest',     secs: 30,  rounds: 1, detail: '' },
+  { name: 'Jump rope',                   phase: 'warmup',   secs: 120, rounds: 1, detail: 'Light pace' },
+  { name: 'Arm circles  shoulder rolls', phase: 'warmup',   secs: 60,  rounds: 1, detail: 'Full ROM' },
+  { name: 'Rest',                        phase: 'rest',     secs: 30,  rounds: 1, detail: '' },
 ];
-const HB_CD = [
-  { name: 'Cool-down stretch',            phase: 'cooldown', secs: 300, rounds: 1, detail: 'Static stretching' },
-];
+const HB_CD = [{ name: 'Cool-down stretch', phase: 'cooldown', secs: 180, rounds: 1, detail: 'Full body recovery' }];
 
 const HB_DATA = {
   HB_BEG_1: { label: 'HB 1', pill: 'pa', color: '#BA7517', exercises: [
@@ -1019,21 +681,18 @@ const HB_DATA = {
     RBTR60,
     { name: 'Bodyweight squats',            phase: 'strength', secs: 30,  rounds: 3, detail: '15 reps' },
     REST30,
-    { name: 'Bicycle crunches',             phase: 'core',     secs: 30,  rounds: 2, detail: 'Controlled rotation' },
     ...HB_CD 
   ]},
   HB_BEG_3: { label: 'HB 3', pill: 'pa', color: '#BA7517', exercises: [
     ...HB_WUP,
     { name: 'Heavy bag – power shots',      phase: 'boxing',   secs: 120, rounds: 3, detail: 'Full rotation, sit on punches' },
     RBTR60,
-    { name: 'Heavy bag – Endurance',        phase: 'boxing',   secs: 180, rounds: 2, detail: 'Keep moving, keep popping', noBack: true },
+    { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 120, rounds: 2, detail: 'Continuous straight punches', noBack: true },
     RBTR60,
-    { name: 'Walking lunges',               phase: 'strength', secs: 40,  rounds: 2, detail: 'Stay balanced' },
+    { name: 'Walking lunges',               phase: 'strength', secs: 30,  rounds: 2, detail: 'Stay balanced' },
     REST30,
-    { name: 'Mountain climbers',            phase: 'core',     secs: 40,  rounds: 2, detail: 'Moderate pace' },
     ...HB_CD 
   ]},
-  
   HB_INT_1: { label: 'HB 1', pill: 'pb', color: '#185FA5', exercises: [
     ...HB_WUP,
     { name: 'Heavy bag – Def. Counters',    phase: 'boxing',   secs: 180, rounds: 3, detail: 'Slip and Counter', noBack: true },
@@ -1042,7 +701,6 @@ const HB_DATA = {
     RBTR60,
     { name: 'Push-ups – shoulder taps',     phase: 'strength', secs: 45,  rounds: 2, detail: 'Stability focus' },
     REST30,
-    { name: 'Russian twists',                phase: 'core',     secs: 45,  rounds: 2, detail: 'Fast rotation', noBack: true },
     ...HB_CD 
   ]},
   HB_INT_2: { label: 'HB 2', pill: 'pb', color: '#185FA5', exercises: [
@@ -1053,41 +711,36 @@ const HB_DATA = {
     RBTR60,
     { name: 'Jump squats',                  phase: 'strength', secs: 45,  rounds: 2, detail: 'Explosive power' },
     REST30,
-    { name: 'V-sits',                       phase: 'core',     secs: 45,  rounds: 2, detail: 'Core tension' },
     ...HB_CD 
   ]},
   HB_INT_3: { label: 'HB 3', pill: 'pb', color: '#185FA5', exercises: [
     ...HB_WUP,
-    { name: 'Heavy bag – Power Pyramid',    phase: 'boxing',   secs: 180, rounds: 3, detail: 'Build the volume' },
+    { name: 'Heavy bag – Technical HIIT',   phase: 'boxing',   secs: 180, rounds: 3, detail: 'Explosive technique bursts', noBack: true },
     RBTR60,
-    { name: 'Heavy bag – Technical HIIT',   phase: 'boxing',   secs: 180, rounds: 2, detail: 'Explosive technique bursts', noBack: true },
+    { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 180, rounds: 2, detail: 'Nonstop punches' },
     RBTR60,
     { name: 'Push-ups',                     phase: 'strength', secs: 60,  rounds: 2, detail: 'Max reps' },
     REST30,
-    { name: 'Leg raises',                   phase: 'core',     secs: 45,  rounds: 2, detail: 'Lower abs' },
     ...HB_CD 
   ]},
-
   HB_ADV_1: { label: 'HB 1', pill: 'pc', color: '#E24B4A', exercises: [
     ...HB_WUP,
     { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 180, rounds: 4, detail: 'Max intensity intervals', noBack: true },
     RBTR45,
-    { name: 'Heavy bag – Speed Tabata',     phase: 'boxing',   secs: 240, rounds: 2, detail: 'Sprints on the bag', noBack: true },
+    { name: 'Heavy bag – Tabata',           phase: 'boxing',   secs: 240, rounds: 2, detail: 'Sprints on the bag', noBack: true },
     RBTR60,
     { name: 'Burpees',                      phase: 'strength', secs: 60,  rounds: 3, detail: 'Max heart rate' },
     REST30,
-    { name: 'Russian twists',                phase: 'core',     secs: 60,  rounds: 2, detail: 'Full range', noBack: true },
     ...HB_CD 
   ]},
   HB_ADV_2: { label: 'HB 2', pill: 'pc', color: '#E24B4A', exercises: [
     ...HB_WUP,
     { name: 'Heavy bag – Technical HIIT',   phase: 'boxing',   secs: 180, rounds: 4, detail: 'Explosive speed', noBack: true },
     RBTR45,
-    { name: 'Heavy bag – Inside Fighting',  phase: 'boxing',   secs: 180, rounds: 2, detail: 'Rip hooks & uppercuts' },
+    { name: 'Heavy bag – Body Snatcher',    phase: 'boxing',   secs: 180, rounds: 2, detail: 'Rip hooks & uppercuts' },
     RBTR60,
     { name: 'Jump squats',                  phase: 'strength', secs: 60,  rounds: 3, detail: 'Explosivity' },
     REST30,
-    { name: 'Hollow body hold',             phase: 'core',     secs: 60,  rounds: 2, detail: 'Total core burn' },
     ...HB_CD 
   ]},
   HB_ADV_3: { label: 'HB 3', pill: 'pc', color: '#E24B4A', exercises: [
@@ -1098,7 +751,6 @@ const HB_DATA = {
     RBTR60,
     { name: 'Burpees',                      phase: 'strength', secs: 60,  rounds: 3, detail: 'Empty the tank' },
     REST30,
-    { name: 'Plank',                        phase: 'core',     secs: 90,  rounds: 2, detail: 'Mental toughness' },
     ...HB_CD 
   ]},
 };
@@ -1106,6 +758,96 @@ const HB_DATA = {
 Object.assign(WORKOUTS_BEG, HB_DATA);
 Object.assign(WORKOUTS_INT, HB_DATA);
 Object.assign(WORKOUTS_ADV, HB_DATA);
+
+/* ── TRX DATA ── */
+const TRX_ROUTINES = {
+  1: {
+    title: 'Level 1: Mobility & Back Relief',
+    desc: 'Decompress lumbar spine and activate deep stabilizers.',
+    exercises: [
+      { name: 'TRX Standing Row – Slow', phase: 'warmup', secs: 60, rounds: 2, detail: 'Gentle lumbar traction, squeeze scaps' },
+      REST30,
+      { name: 'TRX Supported Glute Bridge', phase: 'strength', secs: 60, rounds: 3, detail: 'Heels in straps, lift hips' },
+      REST30,
+      { name: 'TRX Fallout (Kneeling)', phase: 'core', secs: 60, rounds: 2, detail: 'Engage abs, keep neutral spine' },
+      REST30,
+      { name: 'Cool-down stretch', phase: 'cooldown', secs: 120, rounds: 1, detail: 'Assisted child pose and chest stretch' }
+    ]
+  },
+  2: {
+    title: 'Level 2: Core Stability & Rotation',
+    desc: 'Build foundational core strength with anti-rotation control.',
+    exercises: [
+      { name: 'TRX Overhead Squat', phase: 'warmup', secs: 60, rounds: 2, detail: 'Deep squat with counterbalance' },
+      REST30,
+      { name: 'TRX Plank', phase: 'core', secs: 45, rounds: 3, detail: 'Feet in cradles, tight core' },
+      REST30,
+      { name: 'TRX Low Row', phase: 'strength', secs: 60, rounds: 3, detail: 'Pull elbows to ribcage' },
+      REST30,
+      { name: 'Cool-down stretch', phase: 'cooldown', secs: 120, rounds: 1, detail: 'Thoracic and hamstring stretches' }
+    ]
+  },
+  3: {
+    title: 'Level 3: Explosive Boxing Power',
+    desc: 'High-intensity rotational core strength for punch snap and stability.',
+    exercises: [
+      { name: 'TRX Explosive Row', phase: 'warmup', secs: 60, rounds: 3, detail: 'Explosive pull, slow return' },
+      REST30,
+      { name: 'TRX Atomic Push-Up', phase: 'strength', secs: 60, rounds: 3, detail: 'Push-up + knee tuck' },
+      REST30,
+      { name: 'TRX Mountain Climber', phase: 'core', secs: 60, rounds: 3, detail: 'Rapid knees to chest in straps' },
+      REST30,
+      { name: 'Cool-down stretch', phase: 'cooldown', secs: 180, rounds: 1, detail: 'Full body stretch flow' }
+    ]
+  }
+};
+
+let currentTrxLevel = 1;
+
+function setTrxLevel(lvl) {
+  currentTrxLevel = lvl;
+  [1, 2, 3].forEach(l => {
+    const btn = document.getElementById('trx-tab-' + l);
+    if (btn) btn.classList.toggle('active', l === lvl);
+  });
+  buildTrxView();
+}
+
+function buildTrxView() {
+  const routine = TRX_ROUTINES[currentTrxLevel];
+  const listEl = document.getElementById('trxExercisesList');
+  const titleEl = document.getElementById('trxLevelTitle');
+  if (titleEl) titleEl.textContent = routine.title;
+  if (!listEl) return;
+
+  listEl.innerHTML = routine.exercises.map((ex, idx) => {
+    if (ex.phase === 'rest') return '';
+    return `
+      <div class="exrow-t" style="margin-bottom:6px;">
+        <div class="exdot" style="background:${PHASE_META[ex.phase].color}"></div>
+        <div class="exname">${T(ex.name)}</div>
+        <div class="exdur2">${ex.rounds > 1 ? `${ex.rounds}×${fmt(ex.secs)}` : fmt(ex.secs)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function startTrxWorkout() {
+  const routine = TRX_ROUTINES[currentTrxLevel];
+  // Inject into workouts as TRX Day
+  const currentWorkouts = getWorkouts();
+  currentWorkouts['TRX'] = {
+    label: routine.title,
+    pill: 'ptrx',
+    color: '#00C9A7',
+    exercises: routine.exercises
+  };
+  tActiveDay = 'TRX';
+  showView('timer');
+  buildTimerTabs();
+  renderExList();
+  loadEx(false);
+}
 
 /* ── STATE ── */
 const today = new Date();
@@ -1135,14 +877,53 @@ let restMinMs = parseInt(localStorage.getItem('restMinMs') || '1000');
 let restMaxMs = parseInt(localStorage.getItem('restMaxMs') || '5000');
 let restCountdownInterval = null;
 
+function getWeekOfProgram(date) {
+  const start = new Date(programStartDate);
+  const diffTime = Math.abs(date - start);
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return Math.max(1, Math.ceil(diffDays / 7));
+}
+
+function getWorkoutsForDateRange(date) {
+  const progId = localStorage.getItem('activeProgramId') || 'classic';
+  if (progId === 'classic') {
+    const lvl = localStorage.getItem('fitnessLevel') || 'intermediate';
+    if (lvl === 'beginner') return WORKOUTS_BEG;
+    if (lvl === 'advanced') return WORKOUTS_ADV;
+    return WORKOUTS_INT;
+  }
+  const week = getWeekOfProgram(date);
+  if (progId === '6m-ba') {
+    if (week <= 8) return WORKOUTS_BEG;
+    if (week <= 16) return WORKOUTS_INT;
+    return WORKOUTS_ADV;
+  }
+  if (progId === '6m-bi') {
+    if (week <= 12) return WORKOUTS_BEG;
+    return WORKOUTS_INT;
+  }
+  if (progId === '6m-ia') {
+    if (week <= 12) return WORKOUTS_INT;
+    return WORKOUTS_ADV;
+  }
+  if (progId === '1y-ba') {
+    if (week <= 16) return WORKOUTS_BEG;
+    if (week <= 34) return WORKOUTS_INT;
+    return WORKOUTS_ADV;
+  }
+  return WORKOUTS_INT;
+}
+
+function getWorkouts() {
+  return getWorkoutsForDateRange(new Date());
+}
+
 function setLevel(level) {
   localStorage.setItem('fitnessLevel', level);
   highlightLevel();
-  // Sync to Supabase
   if (sbClient && supabaseProfileId) {
     sbClient.from('profiles').update({ fitness_level: level }).eq('id', supabaseProfileId).then();
   }
-  // Reset timer to reflect new workouts
   stopTimer(); tActiveEx = -1; tRound = 1;
   buildTimerTabs(); renderExList(); loadEx(false);
 }
@@ -1263,7 +1044,7 @@ function changeRound(dir) {
   }
 }
 
-/* ── AUDIO ── */
+/* ── AUDIO & SOUND ENGINE ── */
 const PUNCH_SOUNDS = {
   jab:          new Audio('audio/jab.mp3'),
   cross:        new Audio('audio/cross.mp3'),
@@ -1285,10 +1066,24 @@ function ensureAudio() {
 }
 
 function playPunch(key) {
-  const s = PUNCH_SOUNDS[key];
-  if (s) {
-    const clone = s.cloneNode();
-    clone.play().catch(e => console.log('Audio play blocked:', e));
+  triggerHaptic([35]);
+  if (audioMode === 'silent') return;
+  
+  if (audioMode === 'both' || audioMode === 'sfx') {
+    const s = PUNCH_SOUNDS[key];
+    if (s) {
+      const clone = s.cloneNode();
+      clone.play().catch(e => console.log('Audio play blocked:', e));
+    }
+  }
+  
+  if (audioMode === 'voice') {
+    try {
+      const word = PUNCH_DATA[key]?.word || key;
+      const u = new SpeechSynthesisUtterance(word);
+      u.rate = 1.3;
+      speechSynthesis.speak(u);
+    } catch (e) {}
   }
 }
 
@@ -1305,6 +1100,7 @@ function stopCurrentAudio() {
 }
 
 function playExerciseSound(name) {
+  if (audioMode === 'silent') return Promise.resolve();
   stopCurrentAudio();
 
   const tryPlay = (filename) => {
@@ -1327,19 +1123,13 @@ function playExerciseSound(name) {
   const attempts = [
     actualName,
     actualName.toLowerCase(),
-    actualName.replace(/&/g, 'and').replace(/\s*[–—\-]\s*/g, '  '), // Match 'Heavy bag  Feint and Counter'
-    actualName.replace(/&/g, 'and').replace(/\s*[–—\-]\s*/g, ' '),  // Match 'Heavy bag Feint and Counter'
+    actualName.replace(/&/g, 'and').replace(/\s*[–—\-]\s*/g, '  '),
+    actualName.replace(/&/g, 'and').replace(/\s*[–—\-]\s*/g, ' '),
     c,
     c.replace(/\s/g, '  '), 
     actualName.replace(/–/g, '-'),
-    actualName.toLowerCase().replace(/–/g, '-'),
-    (actualName.toLowerCase().match(/[a-z0-9]+/g) || []).join(' '),
-    (actualName.toLowerCase().match(/[a-z0-9]+/g) || []).join('  ')
+    actualName.toLowerCase().replace(/–/g, '-')
   ];
-
-  if (name.toLowerCase().includes('jump rope')) attempts.push('jump rope');
-  if (name.toLowerCase().includes('shadowboxing')) attempts.push('Shadowboxing footwork');
-  if (name.toLowerCase().includes('heavy bag')) attempts.push('Heavy bag – Round 1');
 
   return new Promise(async (resolve) => {
     for (const a of attempts) {
@@ -1349,11 +1139,10 @@ function playExerciseSound(name) {
       } catch (e) {}
     }
     
-    console.log('MP3 not found, using Speech Synthesis for:', name);
     try {
       isSpeaking = true;
       const utterance = new SpeechSynthesisUtterance(name);
-      utterance.lang = 'en-US';
+      utterance.lang = currentLang === 'pt-PT' ? 'pt-PT' : 'en-US';
       utterance.rate = 1.0;
       utterance.onend = () => { isSpeaking = false; resolve(); };
       utterance.onerror = () => { isSpeaking = false; resolve(); };
@@ -1366,6 +1155,8 @@ function playExerciseSound(name) {
 }
 
 function playBell() {
+  triggerHaptic([100, 50, 100]);
+  if (audioMode === 'silent') return;
   ensureAudio();
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
@@ -1376,9 +1167,10 @@ function playBell() {
   g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
   o.start(); o.stop(audioCtx.currentTime + 2.0);
 }
-function playWhistle() { /* Logic for whistle if needed */ }
 
 function playTick() {
+  triggerHaptic([20]);
+  if (audioMode === 'silent') return;
   ensureAudio();
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
@@ -1391,6 +1183,7 @@ function playTick() {
 }
 
 function playTimerSound(key) {
+  if (audioMode === 'silent') return Promise.resolve();
   return new Promise((resolve) => {
     const s = new Audio(`audio/timer/${key}.mp3`);
     currentExAudio = s;
@@ -1401,6 +1194,8 @@ function playTimerSound(key) {
 }
 
 function playGo() {
+  triggerHaptic([60, 40, 60]);
+  if (audioMode === 'silent') return;
   ensureAudio();
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
@@ -1441,7 +1236,331 @@ function startCountdown(onComplete) {
   }, 1000);
 }
 
-/* ── HELPERS ── */
+/* ── STANDALONE QUICK INTERVAL BOXING TIMER ── */
+let intRunning = false;
+let intPaused = false;
+let intPhase = 'prep'; // 'prep', 'work', 'rest'
+let intCurrentRound = 1;
+let intTotalRounds = 6;
+let intWorkSecs = 180;
+let intRestSecs = 60;
+let intRemainingSecs = 5;
+let intIntervalTimer = null;
+
+function openQuickTimerModal() {
+  document.getElementById('quickTimerModal').style.display = 'flex';
+}
+
+function closeQuickTimerModal() {
+  if (!intRunning) {
+    document.getElementById('quickTimerModal').style.display = 'none';
+  } else {
+    // Keep running or confirm
+    document.getElementById('quickTimerModal').style.display = 'none';
+  }
+}
+
+function startQuickTimerFromSettings() {
+  intWorkSecs = parseInt(document.getElementById('intRoundDur').value) || 180;
+  intRestSecs = parseInt(document.getElementById('intRestDur').value) || 60;
+  intTotalRounds = parseInt(document.getElementById('intRoundsCount').value) || 6;
+  startQuickTimer();
+}
+
+function startQuickTimer() {
+  ensureAudio();
+  requestWakeLock();
+  intRunning = true;
+  intPaused = false;
+  intPhase = 'prep';
+  intCurrentRound = 1;
+  intRemainingSecs = 5;
+
+  document.getElementById('intTimerSettings').style.display = 'none';
+  document.getElementById('intTimerDisplay').style.display = 'block';
+  document.getElementById('intPauseBtn').textContent = T('Pause');
+
+  updateQuickTimerUI();
+  playTimerSound(5);
+
+  if (intIntervalTimer) clearInterval(intIntervalTimer);
+  intIntervalTimer = setInterval(quickTimerTick, 1000);
+}
+
+function quickTimerTick() {
+  if (intPaused) return;
+  intRemainingSecs--;
+  
+  if (intPhase === 'prep') {
+    if (intRemainingSecs > 0) {
+      playTimerSound(intRemainingSecs);
+    } else {
+      intPhase = 'work';
+      intRemainingSecs = intWorkSecs;
+      playBell();
+    }
+  } else if (intPhase === 'work') {
+    if (intRemainingSecs === 10) {
+      playTick();
+    } else if ([3, 2, 1].includes(intRemainingSecs)) {
+      playTimerSound(intRemainingSecs);
+    } else if (intRemainingSecs <= 0) {
+      playBell();
+      if (intCurrentRound >= intTotalRounds) {
+        stopQuickTimer();
+        alert(T('Session complete! Great work, fighter!'));
+        return;
+      } else {
+        intPhase = 'rest';
+        intRemainingSecs = intRestSecs;
+      }
+    }
+  } else if (intPhase === 'rest') {
+    if (intRemainingSecs === 10) {
+      playTick();
+    } else if ([3, 2, 1].includes(intRemainingSecs)) {
+      playTimerSound(intRemainingSecs);
+    } else if (intRemainingSecs <= 0) {
+      intCurrentRound++;
+      intPhase = 'work';
+      intRemainingSecs = intWorkSecs;
+      playBell();
+    }
+  }
+  updateQuickTimerUI();
+}
+
+function updateQuickTimerUI() {
+  const digits = document.getElementById('intTimeDigits');
+  const badge = document.getElementById('intPhaseBadge');
+  const info = document.getElementById('intRoundsInfo');
+  if (!digits || !badge || !info) return;
+
+  digits.textContent = fmt(intRemainingSecs);
+  info.textContent = `${T('Round')} ${intCurrentRound} ${T('of')} ${intTotalRounds}`;
+
+  badge.className = 'int-phase-badge';
+  if (intPhase === 'prep') {
+    badge.classList.add('int-phase-prep');
+    badge.textContent = T('Get Ready!');
+  } else if (intPhase === 'work') {
+    badge.classList.add('int-phase-work');
+    badge.textContent = T('WORK');
+  } else if (intPhase === 'rest') {
+    badge.classList.add('int-phase-rest');
+    badge.textContent = T('REST');
+  }
+}
+
+function toggleQuickTimerPause() {
+  intPaused = !intPaused;
+  const btn = document.getElementById('intPauseBtn');
+  if (btn) btn.textContent = intPaused ? T('Resume') : T('Pause');
+}
+
+function stopQuickTimer() {
+  intRunning = false;
+  intPaused = false;
+  if (intIntervalTimer) { clearInterval(intIntervalTimer); intIntervalTimer = null; }
+  if (!tRunning && !wakeLockManual) releaseWakeLock();
+  
+  document.getElementById('intTimerSettings').style.display = 'block';
+  document.getElementById('intTimerDisplay').style.display = 'none';
+}
+
+/* ── CUSTOM COMBO BUILDER ── */
+let currentCustomSeq = [];
+
+function openCustomComboModal() {
+  document.getElementById('comboBuilderModal').style.display = 'flex';
+  const selector = document.getElementById('comboPunchSelector');
+  if (selector) {
+    selector.innerHTML = Object.keys(PUNCH_DATA).map(key => {
+      const p = PUNCH_DATA[key];
+      return `<button onclick="addPunchToCustomCombo('${key}')" class="pchip ${p.chip}" style="cursor:pointer; border:1px solid rgba(255,255,255,0.2);">${p.label}</button>`;
+    }).join('');
+  }
+  currentCustomSeq = [];
+  renderCustomComboSeq();
+}
+
+function closeCustomComboModal() {
+  document.getElementById('comboBuilderModal').style.display = 'none';
+}
+
+function addPunchToCustomCombo(key) {
+  if (currentCustomSeq.length >= 8) return;
+  currentCustomSeq.push(key);
+  playPunch(key);
+  renderCustomComboSeq();
+}
+
+function clearCustomComboSeq() {
+  currentCustomSeq = [];
+  renderCustomComboSeq();
+}
+
+function renderCustomComboSeq() {
+  const container = document.getElementById('customComboSequence');
+  if (!container) return;
+  if (currentCustomSeq.length === 0) {
+    container.innerHTML = `<span style="font-size:12px; color:var(--text-tertiary);">No punches added yet</span>`;
+    return;
+  }
+  container.innerHTML = currentCustomSeq.map((k, i) => {
+    const p = PUNCH_DATA[k];
+    return `<div class="pchip ${p.chip}" onclick="removePunchFromCustomCombo(${i})" style="cursor:pointer;" title="Tap to remove">${p.label} &times;</div>`;
+  }).join('');
+}
+
+function removePunchFromCustomCombo(i) {
+  currentCustomSeq.splice(i, 1);
+  renderCustomComboSeq();
+}
+
+function testPlayCustomCombo() {
+  if (currentCustomSeq.length === 0) return;
+  let delay = 100;
+  currentCustomSeq.forEach(p => {
+    setTimeout(() => {
+      playPunch(p);
+    }, delay);
+    delay += (PUNCH_DATA[p]?.delay || 500) / comboSpeedMultiplier;
+  });
+}
+
+function saveCustomCombo() {
+  const nameInput = document.getElementById('customComboName');
+  const name = nameInput.value.trim() || `Custom Combo (${currentCustomSeq.map(p => PUNCH_DATA[p].label).join('-')})`;
+  if (currentCustomSeq.length === 0) {
+    alert('Please add at least 1 punch to the combo.');
+    return;
+  }
+  const activeProf = userProfiles.find(p => p.id === activeUserId);
+  if (!activeProf.customCombos) activeProf.customCombos = [];
+  activeProf.customCombos.push({ name, punches: [...currentCustomSeq] });
+  localStorage.setItem('boxingProfiles', JSON.stringify(userProfiles));
+  closeCustomComboModal();
+  alert(`Combo "${name}" saved and added to workout generator!`);
+}
+
+/* ── GAMIFICATION & BADGES ── */
+const BADGES = [
+  { id: 'first_blood', name: 'First Blood', icon: '🥊', desc: 'Completed first workout', check: (c) => Object.keys(c).length >= 1 },
+  { id: 'streak_3', name: '3-Day Streak', icon: '🔥', desc: '3 scheduled days completed', check: (c, s) => s >= 3 },
+  { id: 'streak_7', name: 'Iron Will', icon: '⚡', desc: '7-day training streak', check: (c, s) => s >= 7 },
+  { id: 'heavy_hitter', name: 'Heavy Hitter', icon: '💥', desc: '2,500 estimated punches', check: (c) => Object.keys(c).length * 150 >= 2500 },
+  { id: 'golden_gloves', name: 'Golden Gloves', icon: '👑', desc: '10,000 estimated punches', check: (c) => Object.keys(c).length * 150 >= 10000 },
+  { id: 'centurion', name: 'Centurion', icon: '🏆', desc: 'Completed 20 full sessions', check: (c) => Object.keys(c).length >= 20 },
+];
+
+function buildBadgesGrid() {
+  const grid = document.getElementById('badgesGrid');
+  if (!grid) return;
+  const count = Object.keys(completed).length;
+  grid.innerHTML = BADGES.map(b => {
+    const isUnlocked = b.check(completed, count);
+    return `
+      <div class="badge-card ${isUnlocked ? 'unlocked' : ''}">
+        <div class="badge-icon" style="${isUnlocked ? '' : 'filter:grayscale(1); opacity:0.4;'}">${b.icon}</div>
+        <div class="badge-name">${T(b.name)}</div>
+        <div class="badge-desc">${T(b.desc)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+/* ── DATA BACKUP & PORTABILITY ── */
+function exportDataJSON() {
+  const exportPayload = {
+    app: 'BoxingCoachPRO',
+    version: '2.0.0',
+    exportDate: new Date().toISOString(),
+    profiles: userProfiles,
+    activeUserId,
+    completedWorkouts: completed,
+    programStartDate,
+    fitnessLevel: localStorage.getItem('fitnessLevel') || 'intermediate',
+    activeProgramId: localStorage.getItem('activeProgramId') || 'classic',
+    workoutDays,
+    dayOrder
+  };
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportPayload, null, 2));
+  const downloadAnchor = document.createElement('a');
+  downloadAnchor.setAttribute("href", dataStr);
+  downloadAnchor.setAttribute("download", `boxing_coach_backup_${new Date().toISOString().split('T')[0]}.json`);
+  document.body.appendChild(downloadAnchor);
+  downloadAnchor.click();
+  downloadAnchor.remove();
+}
+
+function importDataJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.profiles) {
+        userProfiles = data.profiles;
+        localStorage.setItem('boxingProfiles', JSON.stringify(userProfiles));
+      }
+      if (data.completedWorkouts) {
+        completed = data.completedWorkouts;
+      }
+      if (data.workoutDays) workoutDays = data.workoutDays;
+      if (data.dayOrder) dayOrder = data.dayOrder;
+      if (data.programStartDate) {
+        programStartDate = data.programStartDate;
+        localStorage.setItem('programStartDate', programStartDate);
+      }
+      alert('Data backup successfully restored!');
+      window.location.reload();
+    } catch (err) {
+      alert('Failed to parse backup file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+/* ── COMBO LOGIC & HELPERS ── */
+function getAllowedPunches(exName, exDetail) {
+  const text = (exName + ' ' + (exDetail || '')).toLowerCase();
+  
+  if (text.includes('1-2 basics') || text.includes('round 2')) return ['jab', 'cross'];
+  if (text.includes('round 1') || text.includes('rapid jabs')) return ['jab'];
+  if (text.includes('1-2-3 combos') || text.includes('round 3')) return ['jab', 'cross', 'lead-hook'];
+  if (text.includes('lead hook')) return ['lead-hook'];
+  if (text.includes('rear hook')) return ['rear-hook'];
+  if (text.includes('lead uppercut')) return ['lead-upper'];
+  if (text.includes('rear uppercut')) return ['rear-upper'];
+  if (text.includes('slips and rolls')) return ['jab', 'cross', 'slip', 'roll'];
+  if (text.includes('body shots') || text.includes('body snatcher')) {
+    return ['body-jab', 'body-cross', 'body-lead-hook', 'body-rear-hook', 'lead-hook', 'cross'];
+  }
+  if (text.includes('defensive') || text.includes('counters') || text.includes('def. counters')) {
+    return ['slip', 'roll', 'feint', 'cross', 'lead-hook', 'lead-upper', 'rear-upper'];
+  }
+  return Object.keys(PUNCH_DATA);
+}
+
+function generateNextCombo(ex) {
+  const allowed = getAllowedPunches(ex.name, ex.detail);
+  const pool = getCombosForLevel().filter(c => c.punches.every(p => allowed.includes(p)));
+  if (pool.length > 0) {
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+  const randomPunches = [];
+  const length = Math.floor(Math.random() * 3) + 2;
+  for (let i = 0; i < length; i++) {
+    randomPunches.push(allowed[Math.floor(Math.random() * allowed.length)]);
+  }
+  return {
+    name: 'Dynamic Combo',
+    punches: randomPunches
+  };
+}
+
 function fmt(s) {
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 }
@@ -1454,27 +1573,25 @@ function getWorkoutForDate(y, m, d) {
   return dayOrder[idx % dayOrder.length] || 'R';
 }
 
-/* ── NAVIGATION ── */
 function showView(v) {
   document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(el => {
-    // Only main tabs, subtabs use .dt
-    if (el.parentElement.classList.contains('tab-bar')) {
-       el.classList.remove('active');
-    }
-  });
+  document.querySelectorAll('.tab-bar .tab').forEach(el => el.classList.remove('active'));
+  
   const target = document.getElementById('view-' + v);
   if (target) target.classList.add('active');
-  const mapping = { calendar: 0, timer: 1, technique: 2, settings: 3 };
+  
+  const mapping = { calendar: 0, timer: 1, trx: 2, technique: 3, settings: 4 };
   const idx = mapping[v];
   if (idx !== undefined) {
     const mainTabs = document.querySelectorAll('.tab-bar .tab');
     if (mainTabs[idx]) mainTabs[idx].classList.add('active');
   }
+  
   if (v === 'calendar') buildCalendar();
   if (v === 'timer') { buildTimerTabs(); renderExList(); loadEx(false); }
+  if (v === 'trx') buildTrxView();
   if (v === 'technique') buildTechnique();
-  if (v === 'settings') buildSettings();
+  if (v === 'settings') { buildSettings(); buildBadgesGrid(); }
 }
 
 function buildTechnique() {
@@ -1485,7 +1602,7 @@ function buildTechnique() {
       <div class="tech-title">
         ${T(p.name)}
         <a href="${p.yt}" target="_blank" class="tech-btn">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="margin-top:1px"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
           ${T('Video')}
         </a>
       </div>
@@ -1497,7 +1614,13 @@ function buildTechnique() {
   `).join('');
 }
 
-/* ── CALENDAR ── */
+function shiftMonth(dir) {
+  viewMonth += dir;
+  if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+  if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+  buildCalendar();
+}
+
 function buildCalendar() {
   const y = viewYear, mo = viewMonth;
   document.getElementById('calTitle').textContent = T(MONTHS[mo]) + ' ' + y;
@@ -1527,7 +1650,7 @@ function buildCalendar() {
     const currentWorkouts = getWorkouts();
     const pillCls = wt === 'R' ? 'pr' : (currentWorkouts[wt]?.pill || 'pa');
     const pillLbl = wt === 'R' ? T('Rest') : T('Day ' + wt);
-    const focusTxt = wt === 'A' ? T('Power') : wt === 'B' ? T('Speed') : wt === 'C' ? T('Cond.') : '';
+    const focusTxt = wt === 'A' ? T('Power') : wt === 'B' ? T('Speed') : wt === 'C' ? T('Cond.') : wt === 'D' ? T('Ring.') : '';
 
     html += `<div class="${cls}" onclick="calSelect('${dk}',${d})" id="dc-${dk}">
       <div class="dn">${d}</div>
@@ -1543,7 +1666,7 @@ function buildCalendar() {
 
   document.getElementById('sSess').textContent = sess;
   document.getElementById('sDone').textContent = done;
-  document.getElementById('sHrs').textContent = (done * 1); // 1h per session
+  document.getElementById('sHrs').textContent = (done * 1);
   document.getElementById('sStr').textContent = streak + 'd';
 }
 
@@ -1563,7 +1686,7 @@ function calSelect(dk, d) {
     <div class="dp-hd">
       <div>
         <div class="dp-sub">${T(dateStr)} • ${T('Week')} ${weekNum} • ${T(woLevel)}</div>
-        <div class="dp-title">${wt === 'R' ? T('Rest day') : T('Day ' + wt) + ' – ' + T(wt === 'A' ? 'Power' : wt === 'B' ? 'Speed' : 'Cond.')}</div>
+        <div class="dp-title">${wt === 'R' ? T('Rest day') : T('Day ' + wt) + ' – ' + T(wt === 'A' ? 'Power' : wt === 'B' ? 'Speed' : wt === 'C' ? 'Cond.' : 'Ringcraft')}</div>
       </div>
       <div class="dp-actions">`;
 
@@ -1580,42 +1703,37 @@ function calSelect(dk, d) {
     const wo = currentWorkouts[wt];
     let lastPh = null;
     html += `<div>`;
-    wo.exercises.forEach(ex => {
-      const ph = ex.phase;
-      if (ph !== 'rest' && ph !== lastPh) { html += `<div class="ph-lbl">${T(PHASE_META[ph].label)}</div>`; lastPh = ph; }
-      if (ph === 'rest') return;
-      const info = EXERCISE_INFO[ex.name];
-      const ytLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(ex.name + ' boxing tutorial')}`;
-      const fullInfo = info ? `${T(info)}<br><a href="${ytLink}" target="_blank" style="display:inline-block;margin-top:6px;color:#ffffff;font-weight:600;text-decoration:none;">&#9654; ${T('Watch Tutorial')}</a>` : '';
-      const rnd = ex.rounds > 1 ? `${ex.rounds}×${fmt(ex.secs)}` : fmt(ex.secs);
-      const safeId = ex.name.replace(/\W/g, '');
-      html += `<div class="exrow" style="flex-wrap:wrap;cursor:pointer" onclick="toggleInfo(event,'eip_cal_${safeId}')">
-        <div class="ephase ${PHASE_META[ph].cls}">${T(PHASE_META[ph].label).slice(0,4)}</div>
-        <div style="flex:1;font-size:12px;color:var(--text-primary)">
-          ${T(ex.name)}${ex.noBack ? ` <span style="color:#F5A623;font-size:10px;font-weight:700">(${T('Back Care')} ⚠️)</span>` : ''}
-          ${ex.detail ? `<div style="font-size:11px;color:var(--text-secondary);font-weight:400">${T(ex.detail)}</div>` : ''}
-        </div>
-        <div class="edur">${rnd}</div>
-        ${info ? `<button class="info-btn" style="pointer-events:none">
-          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-        </button>
-        <div class="info-panel" id="eip_cal_${safeId}" style="display:none" onclick="event.stopPropagation()">${fullInfo}</div>` : ''}
-      </div>`;
-    });
-    html += `</div><div style="margin-top:.5rem;font-size:11px;color:var(--text-tertiary)">${T('60 min · 3 boxing rounds · punch sounds + combo timer')}</div>`;
+    if (wo && wo.exercises) {
+      wo.exercises.forEach(ex => {
+        const ph = ex.phase;
+        if (ph !== 'rest' && ph !== lastPh) { html += `<div class="ph-lbl">${T(PHASE_META[ph].label)}</div>`; lastPh = ph; }
+        if (ph === 'rest') return;
+        const info = EXERCISE_INFO[ex.name];
+        const ytLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(ex.name + ' boxing tutorial')}`;
+        const rnd = ex.rounds > 1 ? `${ex.rounds}×${fmt(ex.secs)}` : fmt(ex.secs);
+        const safeId = ex.name.replace(/\W/g, '');
+        html += `<div class="exrow" style="flex-wrap:wrap;cursor:pointer" onclick="toggleInfo(event,'eip_cal_${safeId}')">
+          <div class="ephase ${PHASE_META[ph].cls}">${T(PHASE_META[ph].label).slice(0,4)}</div>
+          <div style="flex:1;font-size:12px;color:var(--text-primary)">
+            ${T(ex.name)}${ex.noBack ? ` <span style="color:#F5A623;font-size:10px;font-weight:700">(${T('Back Care')} ⚠️)</span>` : ''}
+            ${ex.detail ? `<div style="font-size:11px;color:var(--text-secondary);font-weight:400">${T(ex.detail)}</div>` : ''}
+          </div>
+          <div class="edur">${rnd}</div>
+          <div class="info-panel" id="eip_cal_${safeId}">${T(info || '')}<br><a href="${ytLink}" target="_blank" style="display:inline-block;margin-top:6px;color:#ffffff;font-weight:700;text-decoration:none;">&#9654; Video Tutorial</a></div>
+        </div>`;
+      });
+    }
+    html += `</div>`;
   }
 
-  html += `</div>`;
-  const panel = document.getElementById('calDetail');
-  panel.innerHTML = html;
-  panel.style.display = 'block';
-  buildCalendar();
-  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  const detailEl = document.getElementById('calDetail');
+  detailEl.innerHTML = html;
+  detailEl.style.display = 'block';
+  applyTranslations(detailEl);
 }
 
 function toggleDone(dk) {
-  const isDone = completed[dk];
-  if (isDone) {
+  if (completed[dk]) {
     delete completed[dk];
     if (sbClient) sbClient.from('workouts_completed').delete().match({ profile_id: supabaseProfileId, day_key: dk }).then();
   } else {
@@ -1625,197 +1743,113 @@ function toggleDone(dk) {
   buildCalendar();
   const parts = dk.split('-');
   calSelect(dk, parseInt(parts[2]));
+  buildBadgesGrid();
 }
 
-function launchTimer(wt) {
+function launchTimer(day) {
+  tActiveDay = day;
   showView('timer');
-  switchTimerDay(wt);
 }
 
-function shiftMonth(d) {
-  viewMonth += d;
-  if (viewMonth > 11) { viewMonth = 0; viewYear++; }
-  if (viewMonth < 0) { viewMonth = 11; viewYear--; }
-  selectedCalDay = null;
-  document.getElementById('calDetail').style.display = 'none';
-  buildCalendar();
-}
-
-/* ── TIMER ── */
-const renderTabs = (id, keys) => {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.innerHTML = keys.map(k =>
-    `<button class="dt${k === tActiveDay ? ' active' : ''}" onclick="switchTimerDay('${k}')">${T(getWorkouts()[k]?.label || k)}</button>`
-  ).join('');
-};
-
+/* ── WORKOUTS & TIMER LOGIC ── */
 function buildTimerTabs() {
-  const wo = getWorkouts();
-  // Filter for A1, A2, A3, B1, B2, B3, C1, C2, C3, D
-  const keys = Object.keys(wo).filter(k => 
-    !k.startsWith('HB') && // Exclude heavy bag
-    !['A','B','C'].includes(k) // Exclude aliases
-  ).sort((a, b) => {
-    // Sort D to the end, others by variant A1, A2...
-    if (a === 'D') return 1;
-    if (b === 'D') return -1;
-    return a.localeCompare(b);
-  });
-  renderTabs('dayTabsT', keys);
-  
-  renderTabs('hbBegTabs', ['HB_BEG_1', 'HB_BEG_2', 'HB_BEG_3']);
-  renderTabs('hbIntTabs', ['HB_INT_1', 'HB_INT_2', 'HB_INT_3']);
-  renderTabs('hbAdvTabs', ['HB_ADV_1', 'HB_ADV_2', 'HB_ADV_3']);
+  const currentWorkouts = getWorkouts();
+  const days = ['A', 'B', 'C', 'D'];
+  if (currentWorkouts['TRX']) days.push('TRX');
+
+  document.getElementById('dayTabsT').innerHTML = days.map(d => {
+    if (!currentWorkouts[d]) return '';
+    return `<button class="dt${tActiveDay === d ? ' active' : ''}" onclick="selectTimerDay('${d}')">${T(currentWorkouts[d].label)}</button>`;
+  }).join('');
+
+  document.getElementById('hbBegTabs').innerHTML = ['HB_BEG_1', 'HB_BEG_2', 'HB_BEG_3'].map(k => {
+    return `<button class="dt${tActiveDay === k ? ' active' : ''}" onclick="selectTimerDay('${k}')">${currentWorkouts[k]?.label || k}</button>`;
+  }).join('');
+
+  document.getElementById('hbIntTabs').innerHTML = ['HB_INT_1', 'HB_INT_2', 'HB_INT_3'].map(k => {
+    return `<button class="dt${tActiveDay === k ? ' active' : ''}" onclick="selectTimerDay('${k}')">${currentWorkouts[k]?.label || k}</button>`;
+  }).join('');
+
+  document.getElementById('hbAdvTabs').innerHTML = ['HB_ADV_1', 'HB_ADV_2', 'HB_ADV_3'].map(k => {
+    return `<button class="dt${tActiveDay === k ? ' active' : ''}" onclick="selectTimerDay('${k}')">${currentWorkouts[k]?.label || k}</button>`;
+  }).join('');
 }
 
-function switchTimerDay(d) {
-  stopTimer(); tActiveDay = d; tActiveEx = -1; tRound = 1;
-  buildTimerTabs(); renderExList(); loadEx(false);
+function selectTimerDay(day) {
+  stopTimer();
+  tActiveDay = day;
+  tActiveEx = -1;
+  tRound = 1;
+  buildTimerTabs();
+  renderExList();
+  loadEx(false);
 }
 
 function renderExList() {
   const wo = getWorkouts()[tActiveDay];
-  let html = '', lastPh = null, open = false;
-  wo.exercises.forEach((ex, i) => {
-    if (ex.phase === 'rest') { if (open) { html += '</div>'; open = false; } lastPh = null; return; }
-    if (ex.phase !== lastPh) {
-      if (open) html += '</div>';
-      html += `<div class="ph-lbl">${T(PHASE_META[ex.phase].label)}</div><div class="ex-list-t">`;
-      open = true; lastPh = ex.phase;
-    }
-    const info = EXERCISE_INFO[ex.name];
-    const ytLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(ex.name + ' boxing tutorial')}`;
-    const fullInfo = info ? `${T(info)}<br><a href="${ytLink}" target="_blank" style="display:inline-block;margin-top:6px;color:#ffffff;font-weight:600;text-decoration:none;">&#9654; ${T('Watch Tutorial')}</a>` : '';
-    const rnd = ex.rounds > 1 ? `${ex.rounds}×${fmt(ex.secs)}` : fmt(ex.secs);
-    html += `<div class="exrow-t${i === tActiveEx ? ' aex' : ''}" id="et${i}">
-      <div style="display:flex;align-items:center;width:100%;gap:8px;" onclick="jumpToEx(${i})">
-        <div class="exdot" style="background:${PHASE_META[ex.phase].color}"></div>
-        <div class="exname">${T(ex.name)}${ex.noBack ? ` <span style="color:#F5A623;font-size:10px">⚠️</span>` : ''}
-          ${ex.detail ? `<div class="exdet">${T(ex.detail)}</div>` : ''}
-        </div>
-        <div class="exdur2">${rnd}</div>
-        ${info ? `<button class="info-btn" onclick="toggleInfo(event,'eip_t_${i}')">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-        </button>` : ''}
-      </div>
-      ${info ? `<div class="info-panel" id="eip_t_${i}" style="display:none" onclick="event.stopPropagation()">${fullInfo}</div>` : ''}
-    </div>`;
-  });
-  if (open) html += '</div>';
-  document.getElementById('exListT').innerHTML = html;
-}
-
-function getAllowedPunches(name, detail) {
-  const s = (name + ' ' + (detail || '')).toLowerCase();
-  let allowed = new Set();
-  
-  if (s.includes('jab only') || s.includes('rapid jabs')) {
-    allowed.add('jab');
-  } else if (s.includes('1-2 basics') || s.includes('1-2 combo')) {
-    allowed.add('jab'); allowed.add('cross');
-  } else if (s.includes('1-2-3')) {
-    allowed.add('jab'); allowed.add('cross'); allowed.add('lead-hook');
-  } else if (s.includes('lead hook')) {
-    allowed.add('lead-hook');
-  } else if (s.includes('rear hook')) {
-    allowed.add('rear-hook');
-  } else if (s.includes('lead uppercut')) {
-    allowed.add('lead-upper');
-  } else if (s.includes('rear uppercut')) {
-    allowed.add('rear-upper');
-  } else if (s.includes('body shots') || s.includes('body snatcher')) {
-    allowed.add('body-jab'); allowed.add('body-cross'); allowed.add('body-lead-hook'); allowed.add('body-rear-hook');
-  } else if (s.includes('slips and rolls')) {
-    allowed.add('slip'); allowed.add('roll');
-  } else if (s.includes('defensive')) {
-    allowed.add('slip'); allowed.add('roll'); allowed.add('feint'); allowed.add('jab'); allowed.add('cross');
-  } else if (s.includes('check hooks')) {
-    allowed.add('lead-hook'); allowed.add('rear-hook');
-  } else {
-    return Object.keys(PUNCH_DATA);
-  }
-  return Array.from(allowed);
-}
-
-function generateNextCombo(ex) {
-  if (ex.name === 'HIIT – 10-punch burst  squat') {
-    return { name: '10-Punch Burst!', punches: ['jab','cross','jab','cross','jab','cross','jab','cross','jab','cross'] };
-  }
-  const allowed = getAllowedPunches(ex.name, ex.detail);
-  const _combos = getCombosForLevel(); 
-  const validCombos = _combos.filter(c => c.punches.every(p => allowed.includes(p)));
-  if (validCombos.length > 0) {
-    return validCombos[Math.floor(Math.random() * validCombos.length)];
-  } else {
-    const p1 = allowed[Math.floor(Math.random() * allowed.length)];
-    const p2 = allowed[Math.floor(Math.random() * allowed.length)];
-    return { name: 'Focus', punches: [p1, p2] };
-  }
+  if (!wo) return;
+  document.getElementById('exListT').innerHTML = `
+    <div class="ex-list-t">
+      ${wo.exercises.map((ex, i) => {
+        const info = EXERCISE_INFO[ex.name];
+        const ytLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(ex.name + ' boxing tutorial')}`;
+        const safeId = 'et_info_' + i;
+        const dur = ex.rounds > 1 ? `${ex.rounds}×${fmt(ex.secs)}` : fmt(ex.secs);
+        return `
+          <div class="exrow-t${i === tActiveEx ? ' aex' : ''}" id="et${i}" onclick="jumpToEx(${i})">
+            <div class="exdot" style="background:${PHASE_META[ex.phase].color}"></div>
+            <div class="exname">${T(ex.name)}</div>
+            <div class="exdur2">${dur}</div>
+            ${info ? `<button class="info-btn" onclick="toggleInfo(event,'${safeId}')">ℹ</button>` : ''}
+            ${info ? `<div class="info-panel" id="${safeId}">${T(info)}<br><a href="${ytLink}" target="_blank" style="display:inline-block;margin-top:4px;color:#fff;font-weight:700;text-decoration:none;">&#9654; Tutorial</a></div>` : ''}
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
 }
 
 async function loadEx(playAudio = true) {
-  if (tActiveEx === -1) {
-    document.getElementById('timeBig').textContent = '--:--';
+  const wo = getWorkouts()[tActiveDay];
+  if (!wo) return;
+
+  if (tActiveEx < 0 || tActiveEx >= wo.exercises.length) {
+    document.getElementById('tcName').textContent = T(wo.label);
+    document.getElementById('tcBadge').textContent = T(wo.label);
+    document.getElementById('tcBadge').style.background = wo.color;
+    document.getElementById('timeBig').textContent = '0:00';
     document.getElementById('ringFg').style.strokeDashoffset = CIRC;
-    document.getElementById('ringFg').style.stroke = '#888780';
-    document.getElementById('tcName').textContent = T('Ready to Train?');
-    const b = document.getElementById('tcBadge');
-    b.className = 'tc-badge eph-rest';
-    b.textContent = T('Pre-game');
-    document.getElementById('rndInfo').textContent = T(getWorkouts()[tActiveDay]?.label || '');
+    document.getElementById('rndInfo').textContent = '';
     document.getElementById('comboBox').style.display = 'none';
     document.getElementById('punchReference').style.display = 'none';
-    document.getElementById('startBtn').textContent = T('Start Workout');
     updateNextUp();
-    document.getElementById('progFill').style.width = '0%';
-    document.getElementById('progPct').textContent = '0%';
-    document.querySelectorAll('.exrow-t').forEach(r => r.classList.remove('aex'));
-    stopCurrentAudio();
+    updateProg();
     return;
   }
 
-  const ex = getWorkouts()[tActiveDay].exercises[tActiveEx];
+  const ex = wo.exercises[tActiveEx];
   tRemaining = ex.secs;
+  document.getElementById('tcName').textContent = T(ex.name);
+  document.getElementById('tcBadge').textContent = T(PHASE_META[ex.phase].label);
+  document.getElementById('tcBadge').style.background = PHASE_META[ex.phase].color;
   document.getElementById('timeBig').textContent = fmt(tRemaining);
-  document.getElementById('ringFg').style.strokeDashoffset = CIRC;
   document.getElementById('ringFg').style.stroke = PHASE_META[ex.phase].color;
-  document.getElementById('tcName').innerHTML = T(ex.name) + (ex.noBack ? `<span style="font-size:16px;margin-left:8px;vertical-align:middle">⚠️</span>` : '');
-  const b = document.getElementById('tcBadge');
-  b.className = 'tc-badge eph-' + ex.phase;
-  b.textContent = T(PHASE_META[ex.phase].label);
+  document.getElementById('ringFg').style.strokeDashoffset = CIRC;
   renderRndInfo(ex);
-  updateNextUp(); updateProg();
-  
-  const durMap = {
-    30: '30 seconds',
-    40: '40 seconds',
-    45: '45 seconds',
-    60: '1 minute',
-    90: '1 minute 30 seconds',
-    120: '2 minutes',
-    150: '2 minutes and 30 seconds',
-    180: '3 minutes',
-    240: '4 minutes',
-    300: '5 minutes'
-  };
+  updateNextUp();
+  updateProg();
 
   stopCurrentAudio();
   if (playAudio) {
     await playExerciseSound(ex.name);
-    if (durMap[ex.secs]) {
-      await playTimerSound(durMap[ex.secs]);
-    }
   }
 
   if (ex.phase === 'boxing') {
     const allowed = getAllowedPunches(ex.name, ex.detail);
     currentCombo = generateNextCombo(ex);
-    
     renderChips(currentCombo, -1);
     document.getElementById('comboBox').style.display = 'block';
     
-    // Render static punch reference filtered by allowed punches
     document.getElementById('punchReferenceGrid').innerHTML = allowed.map(p => {
       const pd = PUNCH_DATA[p];
       return `<div class="pchip ${pd.chip}" style="opacity:0.85">${pd.label}</div>`;
@@ -1825,6 +1859,7 @@ async function loadEx(playAudio = true) {
     document.getElementById('comboBox').style.display = 'none';
     document.getElementById('punchReference').style.display = 'none';
   }
+
   document.querySelectorAll('.exrow-t').forEach(r => r.classList.remove('aex'));
   const row = document.getElementById('et' + tActiveEx);
   if (row) {
@@ -1860,17 +1895,14 @@ function fireCombo(combo) {
     }
     delay += (punchDelay / comboSpeedMultiplier);
   });
-  // After last punch, brief pause then show next combo + rest countdown
+
   comboSeqId = setTimeout(() => {
     if (!tRunning) return;
     const ex = getWorkouts()[tActiveDay].exercises[tActiveEx];
     currentCombo = generateNextCombo(ex);
     renderChips(currentCombo, -1);
 
-    // Get rest duration (fixed or random)
     const thisRestMs = getRestDuration();
-
-    // Show reposition countdown
     const callout = document.getElementById('callout');
     let restSecs = Math.ceil(thisRestMs / 1000);
     callout.textContent = '🥊 ' + T('Reposition') + '... ' + restSecs + 's';
@@ -1918,6 +1950,8 @@ function toggleTimer() {
     loadEx(false);
   }
 
+  requestWakeLock();
+
   startCountdown(() => {
     beginExerciseTimer();
   });
@@ -1947,10 +1981,7 @@ function beginExerciseTimer() {
     if (tRemaining === 240) playTimerSound('4 minutes');
     if (tRemaining === 180) playTimerSound('3 minutes');
     if (tRemaining === 120) playTimerSound('2 minutes');
-    if (tRemaining === 90)  playTimerSound('1 minute 30 seconds');
     if (tRemaining === 60)  playTimerSound('1 minute');
-    if (tRemaining === 45)  playTimerSound('45 seconds');
-    if (tRemaining === 40)  playTimerSound('40 seconds');
     if (tRemaining === 30)  playTimerSound('30 seconds');
     
     if ([3,2,1].includes(tRemaining)) playTimerSound(tRemaining);
@@ -2013,7 +2044,8 @@ function markSessionComplete(dk) {
     completed[dk] = true;
     if (sbClient) sbClient.from('workouts_completed').insert({ profile_id: supabaseProfileId, day_key: dk }).then();
   }
-  buildCalendar(); // Update calendar in background
+  buildCalendar();
+  buildBadgesGrid();
   
   const newDone = !!completed[dk];
   const btn = document.getElementById('sessionCompleteBtn');
@@ -2029,6 +2061,7 @@ function stopTimer() {
   clearSeq();
   if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
   isCountingDown = false;
+  if (!intRunning && !wakeLockManual) releaseWakeLock();
   document.getElementById('startBtn').textContent = T('Start');
 }
 
@@ -2069,7 +2102,7 @@ function buildSettings() {
 
   grid.innerHTML = DNAMES.map((dn, i) => {
     const cur = getAssignedType(i);
-    const opts = ['R', 'A', 'B', 'C'].map(v =>
+    const opts = ['R', 'A', 'B', 'C', 'D'].map(v =>
       `<option value="${v}"${cur === v ? ' selected' : ''}>${v === 'R' ? T('Rest') : T('Day ' + v)}</option>`
     ).join('');
     return `<div class="day-col">
@@ -2078,7 +2111,6 @@ function buildSettings() {
     </div>`;
   }).join('');
   previewSchedule();
-  buildOrderRow();
 }
 
 function getAssignedType(dow) {
@@ -2093,18 +2125,28 @@ function previewSchedule() {
     A: { bg: '#FCEBEB', c: '#791F1F' },
     B: { bg: '#E6F1FB', c: '#0C447C' },
     C: { bg: '#EAF3DE', c: '#27500A' },
+    D: { bg: '#FAEEDA', c: '#633806' },
     R: { bg: 'var(--bg-secondary)', c: 'var(--text-tertiary)' },
   };
   document.getElementById('weekPreview').innerHTML = DNAMES.map((dn, i) => {
-    const v = picks[i]; const s = styles[v];
+    const v = picks[i]; const s = styles[v] || styles['R'];
     return `<div class="wp-cell" style="background:${s.bg};color:${s.c}">${v === 'R' ? '–' : v}</div>`;
   }).join('');
 }
 
-function buildOrderRow() {
-  document.getElementById('orderRow').innerHTML = dayOrder.map((d, i) =>
-    `<div class="order-chip">${T('Day ' + d)}</div>${i < dayOrder.length - 1 ? '<span class="order-arrow">→</span>' : ''}`
-  ).join('');
+function autoAssignDays(val) {
+  const num = parseInt(val);
+  if (num === 2) {
+    workoutDays = [2, 4]; // Tue, Thu
+    dayOrder = ['A', 'B'];
+  } else if (num === 4) {
+    workoutDays = [1, 2, 4, 5]; // Mon, Tue, Thu, Fri
+    dayOrder = ['A', 'B', 'C', 'D'];
+  } else {
+    workoutDays = [1, 3, 5]; // Mon, Wed, Fri
+    dayOrder = ['A', 'B', 'C', 'D'];
+  }
+  buildSettings();
 }
 
 function saveSchedule() {
@@ -2112,12 +2154,11 @@ function saveSchedule() {
   const training = picks.filter(p => p.val !== 'R');
   if (training.length === 0) { alert(T('Pick at least 1 training day.')); return; }
   
-  // Update locals
   workoutDays = training.map(p => p.dow);
   const assigned = training.map(p => p.val);
   const order = [];
-  ['A', 'B', 'C'].forEach(t => { if (assigned.includes(t)) order.push(t); });
-  dayOrder = order.length > 0 ? order : ['A', 'B', 'C'];
+  ['A', 'B', 'C', 'D'].forEach(t => { if (assigned.includes(t)) order.push(t); });
+  dayOrder = order.length > 0 ? order : ['A', 'B', 'C', 'D'];
   
   const progVal = document.getElementById('programSelect').value;
   const dateVal = document.getElementById('programStart').value;
@@ -2126,7 +2167,6 @@ function saveSchedule() {
   localStorage.setItem('programStartDate', dateVal);
   programStartDate = dateVal;
   
-  // Sync to Supabase
   if (sbClient && supabaseProfileId) {
     sbClient.from('profiles').update({ 
       active_program_id: progVal, 
@@ -2146,10 +2186,11 @@ buildCalendar();
 buildTimerTabs();
 renderExList();
 loadEx(false);
+buildTrxView();
+buildBadgesGrid();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW failed', err));
   });
 }
-
