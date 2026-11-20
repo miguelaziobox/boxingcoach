@@ -1,6 +1,7 @@
 {
-  "name": "Boxing Coach",
-  "short_name": "Boxing",
+  "name": "Boxing Coach Pro",
+  "short_name": "Boxing Pro",
+  "description": "Championship boxing coaching, heavy bag combos, multi-gym strength, treadmill intervals & TRX core.",
   "icons": [
     {
       "src": "images/android/boxing_app_icon.png",
@@ -29,7 +30,7 @@
   ],
   "start_url": "index.html",
   "display": "standalone",
-  "background_color": "#1a1a1a",
-  "theme_color": "#1a1a1a",
+  "background_color": "#050608",
+  "theme_color": "#050608",
   "orientation": "portrait-primary"
 }

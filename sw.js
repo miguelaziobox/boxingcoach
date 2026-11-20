@@ -1,4 +1,4 @@
-const CACHE_NAME = 'boxing-coach-v3';
+const CACHE_NAME = 'boxing-coach-v7';
 const ASSETS = [
   './',
   './index.html',
@@ -7,7 +7,17 @@ const ASSETS = [
   './translations.js',
   './manifest.json',
   './trx.html',
+  './js/storage.js',
+  './js/data-boxing.js',
+  './js/data-combos.js',
+  './js/data-workouts.js',
+  './js/audio-engine.js',
   './images/boxing_bg.jpg',
+  './images/covers/camp_hero.jpg',
+  './images/covers/heavy_bag.jpg',
+  './images/covers/shadow_footwork.jpg',
+  './images/covers/gym_machine.jpg',
+  './images/covers/treadmill_rope.jpg',
   './images/boxing_gloves.png',
   './images/boxing_gloves_base.png',
   './images/android/boxing_app_icon.png',
@@ -51,27 +61,43 @@ const ASSETS = [
   './audio/Shadowboxing_footwork.mp3',
   './audio/Shadowboxing__footwork.mp3',
   './audio/Shadowboxing__ringcraft.mp3',
-  './audio/Shadowboxing_–_1-2-3_combos.mp3',
-  './audio/Shadowboxing_–_defensive.mp3',
-  './audio/Shadowboxing_–_full_combos.mp3',
-  './audio/Shadowboxing_–_full_speed.mp3',
-  './audio/Shadowboxing_–_slips_and_rolls.mp3',
-  './audio/Speed_target_–_rapid_jabs.mp3',
+  './audio/Shadowboxing_\u2013_1-2-3_combos.mp3',
+  './audio/Shadowboxing_\u2013_defensive.mp3',
+  './audio/Shadowboxing_\u2013_full_combos.mp3',
+  './audio/Shadowboxing_\u2013_full_speed.mp3',
+  './audio/Shadowboxing_\u2013_slips_and_rolls.mp3',
+  './audio/Speed_target_\u2013_rapid_jabs.mp3',
   './audio/Conditioning__Sprawls.mp3',
-  './audio/HIIT_–_10-punch_burst__squat.mp3',
-  './audio/Heavy_bag_–_Round_1.mp3',
-  './audio/Heavy_bag_–_Round_2.mp3',
-  './audio/Heavy_bag_–_Round_3.mp3',
-  './audio/Heavy_bag_–_body_shots.mp3',
-  './audio/Heavy_bag_–_power_shots.mp3',
-  './audio/Heavy_bag_–_Burnout.mp3',
-  './audio/Heavy_bag_–_Counters.mp3',
-  './audio/Heavy_bag_–_Def._Counters.mp3',
-  './audio/Heavy_bag_–_Tabata.mp3',
-  './audio/Heavy_bag_–_Technical_HIIT.mp3',
-  './audio/Heavy_bag_–_Body_Snatcher.mp3',
+  './audio/HIIT_\u2013_10-punch_burst__squat.mp3',
+  './audio/Heavy_bag_\u2013_Round_1.mp3',
+  './audio/Heavy_bag_\u2013_Round_2.mp3',
+  './audio/Heavy_bag_\u2013_Round_3.mp3',
+  './audio/Heavy_bag_\u2013_body_shots.mp3',
+  './audio/Heavy_bag_\u2013_power_shots.mp3',
+  './audio/Heavy_bag_\u2013_Burnout.mp3',
+  './audio/Heavy_bag_\u2013_Counters.mp3',
+  './audio/Heavy_bag_\u2013_Def._Counters.mp3',
+  './audio/Heavy_bag_\u2013_Tabata.mp3',
+  './audio/Heavy_bag_\u2013_Technical_HIIT.mp3',
+  './audio/Heavy_bag_\u2013_Body_Snatcher.mp3',
   './audio/Heavy_bag__Check_Hooks.mp3',
-  './audio/Heavy_bag__Feint_and_Counter.mp3'
+  './audio/Heavy_bag__Feint_and_Counter.mp3',
+  './audio/timer/1.mp3',
+  './audio/timer/2.mp3',
+  './audio/timer/3.mp3',
+  './audio/timer/4.mp3',
+  './audio/timer/5.mp3',
+  './audio/timer/10.mp3',
+  './audio/timer/30 seconds.mp3',
+  './audio/timer/40 seconds.mp3',
+  './audio/timer/45 seconds.mp3',
+  './audio/timer/1 minute.mp3',
+  './audio/timer/1 minute 30 seconds.mp3',
+  './audio/timer/2 minutes.mp3',
+  './audio/timer/2 minutes and 30 seconds.mp3',
+  './audio/timer/3 minutes.mp3',
+  './audio/timer/4 minutes.mp3',
+  './audio/timer/5 minutes.mp3'
 ];
 
 self.addEventListener('install', e => {
@@ -91,32 +117,46 @@ self.addEventListener('install', e => {
 
 self.addEventListener('activate', e => {
   e.waitUntil(
-    caches.keys().then(keys => Promise.all(
-      keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
-    ))
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
-  // Network first for Supabase API calls or external CDN, Cache first for local assets
   if (e.request.url.includes('supabase.co') || e.request.url.includes('googleapis') || e.request.url.includes('gstatic')) {
     return;
   }
-  e.respondWith(
-    caches.match(e.request).then(cached => {
-      if (cached) return cached;
-      return fetch(e.request).then(response => {
-        if (!response || response.status !== 200 || response.type !== 'basic') {
+
+  const reqUrl = new URL(e.request.url);
+  const isMedia = /\.(mp3|wav|ogg|jpg|jpeg|png|webp|svg|ico)$/i.test(reqUrl.pathname);
+
+  if (isMedia) {
+    // Cache-first for heavy static audio & cover imagery
+    e.respondWith(
+      caches.match(e.request).then(cached => {
+        if (cached) return cached;
+        return fetch(e.request).then(response => {
+          if (response && response.status === 200 && response.type === 'basic') {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(e.request, copy));
+          }
           return response;
-        }
-        const responseToCache = response.clone();
-        caches.open(CACHE_NAME).then(cache => {
-          cache.put(e.request, responseToCache);
-        });
-        return response;
-      }).catch(() => cached);
-    })
+        }).catch(() => cached);
+      })
+    );
+    return;
+  }
+
+  // Network-first for HTML, JS, CSS, JSON so updates appear immediately while preserving offline fallback
+  e.respondWith(
+    fetch(e.request).then(response => {
+      if (response && response.status === 200 && response.type === 'basic') {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(e.request, copy));
+      }
+      return response;
+    }).catch(() => caches.match(e.request))
   );
 });

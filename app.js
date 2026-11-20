@@ -1,2196 +1,2595 @@
-/* ── DATA (v2.0.0 - Enhanced Boxing Coach) ── */
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const DNAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const CIRC = 2 * Math.PI * 78;
-
-// Initialize Supabase Client
-const SUPABASE_URL = 'https://fuqmqcusthzmqekltpkk.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_dZPVMFIFhd3sXQdx_B9mtw_wVvv5oq7';
-const sbClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
-
-let currentLang = localStorage.getItem('lang') || 'en';
-let audioMode = localStorage.getItem('boxingAudioMode') || 'both'; // 'both', 'sfx', 'voice', 'silent'
-let wakeLock = null;
-let wakeLockManual = false;
-
-let userProfiles = JSON.parse(localStorage.getItem('boxingProfiles')) || [
-  { id: '1', name: 'Fighter 1', customCombos: [] }
-];
-let activeUserId = localStorage.getItem('activeUserId') || userProfiles[0].id;
-if (!userProfiles.find(p => p.id === activeUserId)) activeUserId = userProfiles[0].id;
-
-let programStartDate = localStorage.getItem('programStartDate') || new Date().toISOString().split('T')[0];
-let completed = {};
-let supabaseProfileId = null;
-
-/* ── SCREEN WAKE LOCK ── */
-async function requestWakeLock() {
-  if ('wakeLock' in navigator) {
-    try {
-      wakeLock = await navigator.wakeLock.request('screen');
-      wakeLock.addEventListener('release', () => {
-        updateWakeLockUI(false);
-      });
-      updateWakeLockUI(true);
-    } catch (err) {
-      console.warn('Wake Lock error:', err);
-      updateWakeLockUI(false);
-    }
-  }
-}
-
-async function releaseWakeLock() {
-  if (wakeLock) {
-    try {
-      await wakeLock.release();
-      wakeLock = null;
-    } catch (e) {}
-  }
-  updateWakeLockUI(false);
-}
-
-function toggleWakeLock() {
-  if (wakeLock) {
-    wakeLockManual = false;
-    releaseWakeLock();
-  } else {
-    wakeLockManual = true;
-    requestWakeLock();
-  }
-}
-
-function updateWakeLockUI(active) {
-  const btn = document.getElementById('wakeLockBtn');
-  const txt = document.getElementById('wakeLockText');
-  if (!btn || !txt) return;
-  if (active) {
-    btn.classList.add('active');
-    txt.textContent = T('Awake');
-  } else {
-    btn.classList.remove('active');
-    txt.textContent = T('Screen Awake');
-  }
-}
-
-document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'visible' && (tRunning || intRunning || wakeLockManual)) {
-    await requestWakeLock();
-  }
-});
-
-/* ── HAPTIC VIBRATION ── */
-function triggerHaptic(pattern = [35]) {
-  if (navigator.vibrate) {
-    try { navigator.vibrate(pattern); } catch (e) {}
-  }
-}
-
-/* ── AUDIO MODE ── */
-function setAudioMode(mode) {
-  audioMode = mode;
-  localStorage.setItem('boxingAudioMode', mode);
-  ['both', 'sfx', 'voice', 'silent'].forEach(m => {
-    const btn = document.getElementById('am-' + m);
-    if (btn) btn.classList.toggle('active', m === mode);
-  });
-}
-
-function populateProfiles() {
-  const select = document.getElementById('userSelect');
-  if (!select) return;
-  select.innerHTML = userProfiles.map(p => 
-    `<option value="${p.id}" style="color: black;" ${p.id === activeUserId ? 'selected' : ''}>${T(p.name)}</option>`
-  ).join('');
-  if (userProfiles.length < 5) {
-    select.innerHTML += `<option value="new" style="color: black; font-weight: bold;">${T('+ Add Profile')}</option>`;
-  }
-}
-
-function handleUserSelect(val) {
-  if (val === 'new') {
-    document.getElementById('profileModal').style.display = 'flex';
-    const inp = document.getElementById('profileNameInput');
-    inp.value = '';
-    setTimeout(() => inp.focus(), 50);
-  } else {
-    switchUser(val);
-  }
-}
-
-function closeProfileModal() {
-  document.getElementById('profileModal').style.display = 'none';
-  populateProfiles();
-}
-
-function saveProfileModal() {
-  const pName = document.getElementById('profileNameInput').value;
-  if (pName && pName.trim()) {
-    document.getElementById('profileModal').style.display = 'none';
-    const newId = Date.now().toString();
-    userProfiles.push({ id: newId, name: pName.trim(), customCombos: [] });
-    localStorage.setItem('boxingProfiles', JSON.stringify(userProfiles));
-    switchUser(newId);
-  }
-}
-
-window.addEventListener('DOMContentLoaded', () => {
-  const selector = document.getElementById('langSelect');
-  if (selector) selector.value = currentLang;
-  populateProfiles();
-  applyTranslations(document.body);
-  highlightLevel();
-  setAudioMode(audioMode);
-  
-  // Restore rest controls from saved values
-  const pauseSlider = document.getElementById('pauseSlider');
-  if (pauseSlider) {
-    const pVal = comboPauseMs / 1000;
-    pauseSlider.value = pVal;
-    const pauseValEl = document.getElementById('pauseVal');
-    if (pauseValEl) pauseValEl.textContent = (pVal % 1 === 0 ? pVal.toFixed(0) : pVal.toFixed(1)) + 's';
-  }
-  const restMinSlider = document.getElementById('restMinSlider');
-  if (restMinSlider) {
-    restMinSlider.value = restMinMs / 1000;
-    document.getElementById('restMinVal').textContent = (restMinMs / 1000 % 1 === 0 ? (restMinMs/1000).toFixed(0) : (restMinMs/1000).toFixed(1)) + 's';
-  }
-  const restMaxSlider = document.getElementById('restMaxSlider');
-  if (restMaxSlider) {
-    restMaxSlider.value = restMaxMs / 1000;
-    document.getElementById('restMaxVal').textContent = (restMaxMs / 1000 % 1 === 0 ? (restMaxMs/1000).toFixed(0) : (restMaxMs/1000).toFixed(1)) + 's';
-  }
-  applyRestModeUI();
-
-  if (currentLang !== 'en') {
-    const observer = new MutationObserver((mutations) => {
-      observer.disconnect();
-      applyTranslations(document.body);
-      observer.observe(document.body, { childList: true, subtree: true });
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-  }
-
-  // Cloud Sync
-  initSupabaseSync();
-});
-
-async function initSupabaseSync() {
-  if (!sbClient) return;
-  
-  const activeProfile = userProfiles.find(p => p.id === activeUserId) || userProfiles[0];
-  
-  if (!activeProfile.supabaseProfileId) {
-    activeProfile.supabaseProfileId = "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c =>
-      (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
-    );
-    const legacyId = localStorage.getItem('supabase_profile_id');
-    if (legacyId && activeProfile.id === '1') {
-       activeProfile.supabaseProfileId = legacyId;
-    }
-    localStorage.setItem('boxingProfiles', JSON.stringify(userProfiles));
-  }
-  
-  // Sync Profile Settings from DB if available
-  const { data: profData } = await sbClient.from('profiles').select('*').eq('id', activeProfile.supabaseProfileId).single();
-  if (profData) {
-    if (profData.fitness_level) {
-      localStorage.setItem('fitnessLevel', profData.fitness_level);
-      highlightLevel();
-    }
-    if (profData.program_start_date) {
-      localStorage.setItem('programStartDate', profData.program_start_date);
-      programStartDate = profData.program_start_date;
-    }
-    if (profData.active_program_id) {
-       localStorage.setItem('activeProgramId', profData.active_program_id);
-    }
-  }
-
-  // Sync back local state (ensures DB is up to date)
-  const currentLvl = localStorage.getItem('fitnessLevel') || 'intermediate';
-  const progId = localStorage.getItem('activeProgramId') || 'classic';
-  await sbClient.from('profiles').upsert({ 
-    id: activeProfile.supabaseProfileId, 
-    name: activeProfile.name, 
-    language: currentLang, 
-    fitness_level: currentLvl,
-    program_start_date: programStartDate,
-    active_program_id: progId,
-    active_program: 'classic' 
-  }, { onConflict: 'id' }).select();
-  
-  supabaseProfileId = activeProfile.supabaseProfileId;
-  completed = {}; // Clear for new user context
-
-  const { data } = await sbClient.from('workouts_completed').select('day_key').eq('profile_id', supabaseProfileId);
-  if (data) {
-    data.forEach(row => { completed[row.day_key] = true; });
-  }
-  if (document.getElementById('view-calendar')?.classList.contains('active')) buildCalendar();
-  buildBadgesGrid();
-}
-
-function changeLanguage(lang) {
-  localStorage.setItem('lang', lang);
-  currentLang = lang;
-  window.location.reload();
-}
-
-function switchUser(id) {
-  activeUserId = id;
-  localStorage.setItem('activeUserId', id);
-  populateProfiles();
-  
-  initSupabaseSync().then(() => {
-    buildCalendar();
-    buildBadgesGrid();
-    if (document.getElementById('view-timer')?.classList.contains('active')) {
-      buildTimerTabs(); renderExList(); loadEx(false);
-    } else if (document.getElementById('calDetail')?.style.display === 'block') {
-      if (selectedCalDay) {
-        const parts = selectedCalDay.split('-');
-        calSelect(selectedCalDay, parseInt(parts[2]));
-      }
-    }
-  });
-}
-
-function applyTranslations(root) {
-  if (currentLang === 'en' || typeof PT_DICT === 'undefined') return;
-  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
-  let n;
-  while(n = walk.nextNode()) {
-    const parent = n.parentNode;
-    if (parent && (parent.tagName === 'SCRIPT' || parent.tagName === 'STYLE')) continue;
-    let txt = n.nodeValue;
-    let trimmed = txt.trim();
-    if (trimmed && PT_DICT[trimmed]) {
-      n.nodeValue = txt.replace(trimmed, PT_DICT[trimmed]);
-    }
-  }
-}
-
-function T(txt) {
-  if (currentLang === 'en' || typeof PT_DICT === 'undefined') return txt;
-  return PT_DICT[txt] || txt;
-}
-
-const PUNCH_DATA = {
-  jab:          { label: 'Jab',      chip: 'chip-jab',      word: 'JAB!',         delay: 400 },
-  cross:        { label: 'Cross',    chip: 'chip-cross',    word: 'CROSS!',       delay: 450 },
-  'lead-hook':  { label: 'L.Hook',   chip: 'chip-hook',     word: 'LEAD HOOK!',   delay: 1000 },
-  'rear-hook':  { label: 'R.Hook',   chip: 'chip-hook',     word: 'REAR HOOK!',   delay: 1000 },
-  'lead-upper': { label: 'L.Upper',  chip: 'chip-uppercut', word: 'LEAD UPPER!',  delay: 1000 },
-  'rear-upper': { label: 'R.Upper',  chip: 'chip-uppercut', word: 'REAR UPPER!',  delay: 1000 },
-  'body-jab':       { label: 'B.Jab',     chip: 'chip-body',     word: 'BODY JAB!',       delay: 800 },
-  'body-cross':     { label: 'B.Cross',   chip: 'chip-body',     word: 'BODY CROSS!',     delay: 800 },
-  'body-lead-hook': { label: 'B.L.Hook',  chip: 'chip-body',     word: 'BODY HOOK!',      delay: 1000 },
-  'body-rear-hook': { label: 'B.R.Hook',  chip: 'chip-body',     word: 'BODY HOOK!',      delay: 1000 },
-  slip:         { label: 'Slip',     chip: 'chip-slip',     word: 'SLIP!',        delay: 900 },
-  roll:         { label: 'Roll',     chip: 'chip-slip',     word: 'ROLL!',        delay: 900 },
-  feint:        { label: 'Feint',    chip: 'chip-slip',     word: 'FEINT!',       delay: 600 },
-};
-
-/* ── COMBO LIBRARY (Tiered by difficulty) ── */
-const COMBOS_BEG = [
-  { name: 'Jab–Cross (1–2)',                  punches: ['jab','cross'] },
-  { name: 'Double Jab–Cross (1–1–2)',         punches: ['jab','jab','cross'] },
-  { name: 'Jab–Cross–Jab (1–2–1)',            punches: ['jab','cross','jab'] },
-  { name: 'Jab–Cross–Lead Hook (1–2–3)',      punches: ['jab','cross','lead-hook'] },
-  { name: 'Jab–Lead Hook (1–3)',              punches: ['jab','lead-hook'] },
-  { name: 'Cross–Lead Hook (2–3)',            punches: ['cross','lead-hook'] },
-  { name: 'Jab–Cross–Rear Hook (1–2–4)',      punches: ['jab', 'cross', 'rear-hook'] },
-  { name: 'Lead Uppercut–Cross (5–2)',        punches: ['lead-upper', 'cross'] },
-  { name: 'Jab–Rear Uppercut (1–6)',          punches: ['jab', 'rear-upper'] },
-  { name: 'Body Jab–Cross (7–2)',             punches: ['body-jab','cross'] },
-];
-
-const COMBOS_INT = [
-  ...COMBOS_BEG,
-  { name: '1–2–3–2',                           punches: ['jab','cross','lead-hook','cross'] },
-  { name: 'Jab–Cross–Lead Uppercut (1–2–5)',   punches: ['jab','cross','lead-upper'] },
-  { name: 'Cross–Lead Upper–Lead Hook (2–5–3)',punches: ['cross','lead-upper','lead-hook'] },
-  { name: 'Slip–Cross–Lead Hook',              punches: ['slip','cross','lead-hook'] },
-  { name: 'Jab–Cross–Body Lead Hook (1–2–9)',  punches: ['jab','cross','body-lead-hook'] },
-  { name: 'Body Jab–Head Cross (7–2)',         punches: ['body-jab','cross'] },
-  { name: 'Jab–Rear Upper–Cross (1–6–2)',      punches: ['jab','rear-upper','cross'] },
-  { name: 'Cross–Lead Hook–Cross (2–3–2)',     punches: ['cross','lead-hook','cross'] },
-  { name: 'Slip–Rear Upper–Lead Hook',         punches: ['slip','rear-upper','lead-hook'] },
-  { name: '1–2–Block–3',                       punches: ['jab','cross','slip','lead-hook'] },
-  { name: 'Lead Hook–Rear Hook (3–4)',         punches: ['lead-hook','rear-hook'] },
-  { name: 'Lead Upper–Rear Upper–Hook (5–6–3)',punches: ['lead-upper','rear-upper','lead-hook'] },
-];
-
-const COMBOS_ADV = [
-  ...COMBOS_INT,
-  { name: 'Power Builder (1–2–3–6–3)',          punches: ['jab','cross','lead-hook','rear-upper','lead-hook'] },
-  { name: 'Body Breaker (1–8–9–3–2)',           punches: ['jab','body-cross','body-lead-hook','lead-hook','cross'] },
-  { name: 'Counter Puncher',                    punches: ['feint','cross','slip','rear-upper','lead-hook','cross'] },
-  { name: 'Precision Drill (1–7–2–S–3)',        punches: ['jab','body-jab','cross','slip','lead-hook'] },
-  { name: 'Pressure Fighter',                   punches: ['jab','cross','lead-hook','cross','lead-hook','rear-upper'] },
-  { name: 'Same-Side Punches (3–5–3)',          punches: ['lead-hook','lead-upper','lead-hook'] },
-  { name: 'Level Changer (1–2–6–9–3–2)',        punches: ['jab','cross','rear-upper','body-lead-hook','lead-hook','cross'] },
-  { name: 'Inside Uppercuts (5–6–5–6)',         punches: ['lead-upper','rear-upper','lead-upper','rear-upper'] },
-  { name: 'Speed Flurry (1–2–1–2–3–2–1)',       punches: ['jab','cross','jab','cross','lead-hook','cross','jab'] },
-  { name: 'Inside Hooks & Uppers (3–4–5–6–1)',  punches: ['lead-hook','rear-hook','lead-upper','rear-upper','jab'] },
-  { name: 'Rear Hook Power (1–2–3–4)',          punches: ['jab', 'cross', 'lead-hook', 'rear-hook'] },
-  { name: 'Tyson Drill (Roll–6–3–2)',           punches: ['roll', 'rear-upper', 'lead-hook', 'cross'] },
-];
-
-function getCombosForLevel() {
-  const profile = userProfiles.find(p => p.id === activeUserId);
-  const customCombos = profile?.customCombos || [];
-  
-  const workouts = getWorkoutsForDateRange(new Date());
-  let baseCombos = COMBOS_INT;
-  if (workouts === WORKOUTS_BEG) baseCombos = COMBOS_BEG;
-  if (workouts === WORKOUTS_ADV) baseCombos = COMBOS_ADV;
-  
-  return [...baseCombos, ...customCombos];
-}
-
-const PHASE_META = {
-  warmup:   { label: 'Warm-up',   cls: 'eph-warmup',   color: '#BA7517' },
-  boxing:   { label: 'Boxing',    cls: 'eph-boxing',   color: '#E24B4A' },
-  strength: { label: 'Strength',  cls: 'eph-strength', color: '#185FA5' },
-  core:     { label: 'Core',      cls: 'eph-core',     color: '#639922' },
-  cooldown: { label: 'Cool-down', cls: 'eph-cooldown', color: '#00C9A7' },
-  rest:     { label: 'Rest',      cls: 'eph-rest',     color: '#888780' },
-};
-
-const PUNCH_LIBRARY = [
-  { 
-    id: 'jab', 
-    name: 'The Jab (1)', 
-    desc: 'The most important punch in boxing. A straight lead-hand strike used to gauge distance, blind opponents, and set up power shots.',
-    tips: ['Keep your chin tucked behind your lead shoulder.', 'Snap the hand out and back to your face immediately.', 'Stay light on your feet and avoid leaning forward.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+jab+tutorial'
-  },
-  { 
-    id: 'cross', 
-    name: 'The Cross (2)', 
-    desc: 'The power punch thrown from the rear hand. It travels a longer distance and utilizes full body rotation.',
-    tips: ['Pivot your back foot like you are "squashing a bug".', 'Ensure your lead hand stays up to protect your face.', 'Exhale sharply as you throw the punch.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+cross+tutorial'
-  },
-  { 
-    id: 'hook', 
-    name: 'Lead Hook (3)', 
-    desc: 'A powerful lateral punch thrown with the front hand. It targets the side of the head or the liver.',
-    tips: ['Keep your elbow at a 90-degree angle.', 'Pivot your front foot and rotate your hip aggressively.', 'Keep your rear hand high on your chin.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+hook+tutorial'
-  },
-  { 
-    id: 'uppercut', 
-    name: 'Uppercut (4)', 
-    desc: 'A vertical punch used to strike from underneath, typically targeting the chin of an opponent leaning forward.',
-    tips: ['Dip your knees slightly before throwing.', 'Drive the power from your legs and hips.', 'Do not drop your hand too low before the strike.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+uppercut+tutorial'
-  },
-  { 
-    id: 'body', 
-    name: 'Body Shot', 
-    desc: 'Punches directed at the torso, specifically the liver (lead side) or solar plexus.',
-    tips: ['Bend your knees to change levels; do not just lean over.', 'Step slightly off-center to find the angle.', 'Stay tight and keep your guard up to avoid counters.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+body+shots+tutorial'
-  },
-  { 
-    id: 'slip', 
-    name: 'The Slip', 
-    desc: 'A core defensive movement where you move your head slightly off the center line to evade a straight punch.',
-    tips: ['Small movements are better than big ones.', 'Keep your hands up while slipping.', 'Immediately look for counter-punch opportunities.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+slipping+punches'
-  },
-  { 
-    id: 'roll', 
-    name: 'The Roll (Bob & Weave)', 
-    desc: 'Defending against hooks and overhands by rolling your head and torso underneath the punch in a "U" motion.',
-    tips: ['Transfer your weight from one leg to the other during the roll.', 'Do not bend at the waist; use your knees.', 'Keep your eyes on the opponent even when underneath.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+bob+and+weave+tutorial'
-  },
-  { 
-    id: 'pivot', 
-    name: 'The Pivot', 
-    desc: 'Fundamental footwork used to change angles, create openings, and escape pressure or corners.',
-    tips: ['Stay on the ball of your lead foot.', 'Whip your back leg around to quickly change orientation.', 'Keep your hands up and stay balanced throughout.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+footwork+pivot+tutorial'
-  },
-  { 
-    id: 'check-hook', 
-    name: 'Check Hook', 
-    desc: 'An advanced defensive counter where you throw a lead hook while pivoting away from an aggressive opponent.',
-    tips: ['Time the punch as the opponent moves into your range.', 'The pivot must happen simultaneously with the punch.', 'Lead the opponent into where you were, not where you are.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+check+hook+tutorial'
-  },
-  { 
-    id: 'feint', 
-    name: 'Feinting', 
-    desc: 'The art of deceptive movement to bait a reaction, blind an opponent, or create an opening for a real attack.',
-    tips: ['Use your eyes, hands, and shoulders to sell the fake.', 'Ensure the feint is subtle but convincing.', 'Be ready to capitalize on the opening instantly.'],
-    yt: 'https://www.youtube.com/results?search_query=boxing+feinting+tutorial'
-  }
-];
-
-const EXERCISE_INFO = {
-  'Jump rope': 'Keep elbows tucked in. Stay light on the balls of your feet. Small jumps are enough to clear the rope.',
-  'Jump rope – fast singles': 'Focus on speed. Small, rapid jumps keeping the core tight and hands spinning the rope quickly.',
-  'Jump rope – double unders': 'Flick the wrists quickly to spin the rope twice per jump. Requires a slightly higher jump and good timing.',
-  'Arm circles  shoulder rolls': 'Warm up the shoulder joint by making progressive circles forward and backward, then rolling the shoulders.',
-  'Hip rotations  leg swings': 'Rotate the hips in circles, then swing each leg forward, backward, and side-to-side to loosen the hips and hamstrings.',
-  'Shadowboxing  footwork': 'Focus on your stance and movement. Move forward, backward, and laterally while maintaining balance.',
-  'Shadowboxing footwork': 'Maintain a solid base. Step and drag your feet; never cross them. Visualize an opponent.',
-  'Shadowboxing – Mirror Drill': 'Stand in front of a mirror to self-correct form. Check for tucked chin, hands returning to face, and feet not crossing while moving.',
-  'Shadowboxing – 1-2 basics': 'Focus on the Jab and Cross only. Full arm extension, rotate your hips, and exhale with every punch. Quality over quantity.',
-  'Shadowboxing – 1-2-3 combos': 'Jab, Cross, Lead Hook. Ensure full extension on straight punches and pivot your lead foot on the hook.',
-  'Shadowboxing – slips and rolls': 'Practice evasive head movement. Slip outside straight punches and roll (bob and weave) under hooks.',
-  'Shadowboxing – full combos': 'Put together all offensive and defensive tools. Be creative and visualize a real sparring round.',
-  'Shadowboxing – defensive': 'Emphasize your guard, head movement, and footwork retreats. Only throw counter punches.',
-  'Shadowboxing – full speed': 'Simulate fight pace. Throw punches with max speed while maintaining form and defense.',
-  'Footwork-Only Round': 'Move for a full round without throwing punches. Stay on the balls of your feet, maintain shoulder-width base, move in all directions.',
-  'Heavy bag – power shots': 'Focus on weight transfer and rotation. Sit down on your punches and hit the bag as hard as possible.',
-  'Heavy bag – body shots': 'Change levels by bending your knees. Dig hooks and uppercuts into the lower half of the bag.',
-  'Heavy bag – Round 1': 'Establish distance with the jab. Use double and triple jabs, both head and body.',
-  'Heavy bag – Round 2': 'Focus on the 1-2 combination (Jab-Cross). Ensure the cross lands with power and snapping hip rotation.',
-  'Heavy bag – Round 3': 'Integrate the lead hook (1-2-3). Ensure proper body mechanics and bring hands right back to the guard.',
-  'Heavy bag – Def. Counters': 'Visualize an incoming punch. Slip or roll first, then immediately fire a fast combination.',
-  'Heavy bag – Body Snatcher': 'Use the Jab to blind the opponent, then dig a heavy body hook, followed by an overhand or cross.',
-  'Heavy bag – Burnout': 'Non-stop punching. Throw straight 1-2s continuously at the bag as fast as you can. Empty the tank.',
-  'Heavy bag – Tabata': '15 seconds of maximum-speed punches followed by 15 seconds of active rest (bouncing). Repeat for 8 intervals.',
-  'Heavy bag – Technical HIIT': 'Combine explosive bursts with active recovery (footwork/jabs). Maintain perfect technique even when tired.',
-  'Heavy bag – Counters': 'Work on defending an attack and immediately replying with an uppercut or hook counter.',
-  'Push-ups': 'Keep a straight line from head to heels. Lower your chest to the floor and press up to full extension.',
-  'Push-ups – shoulder taps': 'From push-up position, tap alternate shoulders while keeping hips stable. Builds shoulder stability and core.',
-  'Diamond push-ups': 'Place hands close together under your chest forming a diamond shape. Targets the triceps and inner chest.',
-  'Bodyweight squats': 'Keep your chest up and back straight. Lower your hips until thighs are parallel to the floor.',
-  'Jump squats': 'Explosively jump up from the bottom of the squat position. Land softly and go immediately into the next rep.',
-  'Walking lunges': 'Step forward and lower your hips until both knees are bent at a 90-degree angle.',
-  'Burpees': 'Drop to a push-up position, perform a push-up, jump feet back to hands, and explosively jump up with hands overhead.',
-  'Plank': 'Hold a straight body position resting on your forearms. Squeeze your core and glutes.',
-  'Mountain climbers': 'From a push-up position, rapidly drive your knees alternating toward your chest.',
-  'Cool-down stretch': 'Perform static stretches holding each position for 15-30 seconds to improve flexibility.',
-};
-
-function toggleInfo(e, id) {
-  e.stopPropagation();
-  const panel = document.getElementById(id);
-  if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-}
-
-const WU_STD = [
-  { name: 'Jump rope',                   phase: 'warmup',   secs: 120, rounds: 1, detail: 'Light pace, stay on toes' },
-  { name: 'Arm circles  shoulder rolls', phase: 'warmup',   secs: 60,  rounds: 1, detail: 'Full ROM' },
-  { name: 'Hip rotations  leg swings',   phase: 'warmup',   secs: 60,  rounds: 1, detail: 'Both sides' },
-  { name: 'Rest',                        phase: 'rest',     secs: 30,  rounds: 1, detail: '' },
-];
-const WU_SB = [
-  { name: 'Jump rope',                     phase: 'warmup',   secs: 120, rounds: 1, detail: 'Build rhythm' },
-  { name: 'Neck & wrist mobilisation',     phase: 'warmup',   secs: 60,  rounds: 1, detail: '' },
-  { name: 'Shadowboxing  footwork',        phase: 'warmup',   secs: 90,  rounds: 1, detail: 'Move & pivot' },
-  { name: 'Rest',                          phase: 'rest',     secs: 30,  rounds: 1, detail: '' },
-];
-const WU_DEF = [
-  { name: 'Jump rope',                       phase: 'warmup',   secs: 120, rounds: 1, detail: 'Easy pace' },
-  { name: 'Torso twists',                    phase: 'warmup',   secs: 60,  rounds: 1, detail: 'Loose and fluid' },
-  { name: 'Dynamic stretching',              phase: 'warmup',   secs: 60,  rounds: 1, detail: 'Full range of motion' },
-  { name: 'Rest',                            phase: 'rest',     secs: 30,  rounds: 1, detail: '' },
-];
-const CD_SHORT = [{ name: 'Cool-down stretch', phase: 'cooldown', secs: 180, rounds: 1, detail: 'Full body stretch' }];
-const REST30   = { name: 'Rest',                phase: 'rest',     secs: 30,  rounds: 1, detail: '' };
-const REST20   = { name: 'Rest',                phase: 'rest',     secs: 20,  rounds: 1, detail: '' };
-const RBTR60   = { name: 'Rest between rounds', phase: 'rest',     secs: 60,  rounds: 1, detail: '' };
-const RBTR45   = { name: 'Rest between rounds', phase: 'rest',     secs: 45,  rounds: 1, detail: '' };
-
-const WORKOUTS_BEG = {
-  A: { label: 'Day A – Power', pill: 'pa', color: '#E24B4A', exercises: [
-    ...WU_STD,
-    { name: 'Shadowboxing – Mirror Drill',  phase: 'boxing',   secs: 120, rounds: 2, detail: 'Check chin, guard height, stance' },
-    RBTR60,
-    { name: 'Shadowboxing – 1-2 basics',    phase: 'boxing',   secs: 120, rounds: 2, detail: 'Jab & Cross only – full extension' },
-    RBTR60,
-    { name: 'Heavy bag – Round 1',          phase: 'boxing',   secs: 120, rounds: 2, detail: 'Jab only – find your distance', noBack: true },
-    RBTR60,
-    { name: 'Push-ups',                     phase: 'strength', secs: 30,  rounds: 2, detail: '8–10 reps' },
-    REST30,
-    { name: 'Bodyweight squats',            phase: 'strength', secs: 30,  rounds: 2, detail: '10 reps' },
-    REST30,
-    { name: 'Plank',                        phase: 'core',     secs: 30,  rounds: 2, detail: 'Tight core, level hips' },
-    REST20,
-    ...CD_SHORT,
-  ]},
-  B: { label: 'Day B – Speed', pill: 'pb', color: '#378ADD', exercises: [
-    ...WU_SB,
-    { name: 'Footwork-Only Round',           phase: 'boxing',   secs: 120, rounds: 2, detail: 'Stay on toes, move in all directions' },
-    RBTR60,
-    { name: 'Shadowboxing – slips and rolls', phase: 'boxing',  secs: 90,  rounds: 2, detail: 'Slow, exaggerated head movement' },
-    RBTR60,
-    { name: 'Walking lunges',                phase: 'strength', secs: 30,  rounds: 2, detail: '8 each leg' },
-    REST30,
-    { name: 'Mountain climbers',             phase: 'core',     secs: 30,  rounds: 2, detail: 'Moderate pace' },
-    REST20,
-    ...CD_SHORT,
-  ]},
-  C: { label: 'Day C – Conditioning', pill: 'pc', color: '#639922', exercises: [
-    ...WU_DEF,
-    { name: 'Heavy bag – body shots',       phase: 'boxing',   secs: 120, rounds: 2, detail: 'Bend knees to change level' },
-    RBTR60,
-    { name: 'Shadowboxing – defensive',     phase: 'boxing',   secs: 120, rounds: 2, detail: 'Guard & counter only' },
-    RBTR60,
-    { name: 'Bodyweight squats',            phase: 'strength', secs: 30,  rounds: 2, detail: '10 reps' },
-    REST30,
-    { name: 'Plank',                        phase: 'core',     secs: 30,  rounds: 2, detail: 'Solid core' },
-    REST20,
-    ...CD_SHORT,
-  ]},
-  D: { label: 'Day D – Ringcraft', pill: 'pd', color: '#FAC775', exercises: [
-    ...WU_DEF,
-    { name: 'Shadowboxing – footwork',      phase: 'boxing',   secs: 120, rounds: 2, detail: 'Focus on angles & pivots' },
-    RBTR60,
-    { name: 'Heavy bag – Check Hooks',      phase: 'boxing',   secs: 120, rounds: 2, detail: 'Pivot 90 deg while landing hook' },
-    RBTR60,
-    { name: 'Conditioning – Sprawls',       phase: 'strength', secs: 30,  rounds: 2, detail: 'Max speed sprawls' },
-    REST30,
-    ...CD_SHORT
-  ]}
-};
-
-const WORKOUTS_INT = {
-  A: { label: 'Day A – Power', pill: 'pa', color: '#E24B4A', exercises: [
-    ...WU_STD,
-    { name: 'Shadowboxing – 1-2-3 combos',  phase: 'boxing',   secs: 180, rounds: 3, detail: 'Rotate through power punches' },
-    RBTR60,
-    { name: 'Heavy bag – Round 2',          phase: 'boxing',   secs: 180, rounds: 3, detail: '1-2-3 combos with bad intentions', noBack: true },
-    RBTR60,
-    { name: 'Push-ups – shoulder taps',     phase: 'strength', secs: 45,  rounds: 3, detail: '12-15 reps' },
-    REST30,
-    { name: 'Jump squats',                  phase: 'strength', secs: 45,  rounds: 3, detail: 'Explosive power' },
-    REST30,
-    { name: 'Russian twists',               phase: 'core',     secs: 45,  rounds: 3, detail: 'Rotational power', noBack: true },
-    REST20,
-    ...CD_SHORT
-  ]},
-  B: { label: 'Day B – Speed', pill: 'pb', color: '#378ADD', exercises: [
-    ...WU_SB,
-    { name: 'Speed target – rapid jabs',    phase: 'boxing',   secs: 120, rounds: 3, detail: 'Max hand speed' },
-    RBTR45,
-    { name: 'Shadowboxing – full speed',    phase: 'boxing',   secs: 180, rounds: 3, detail: 'High pace combinations' },
-    RBTR60,
-    { name: 'Diamond push-ups',             phase: 'strength', secs: 45,  rounds: 3, detail: 'Tricep endurance' },
-    REST30,
-    { name: 'Mountain climbers',            phase: 'core',     secs: 45,  rounds: 3, detail: 'Sprint pace' },
-    REST20,
-    ...CD_SHORT
-  ]},
-  C: { label: 'Day C – Conditioning', pill: 'pc', color: '#639922', exercises: [
-    ...WU_DEF,
-    { name: 'HIIT – 10-punch burst  squat', phase: 'boxing',   secs: 180, rounds: 3, detail: 'Punch flurry then squat' },
-    RBTR60,
-    { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 180, rounds: 3, detail: 'Continuous volume', noBack: true },
-    RBTR60,
-    { name: 'Burpees',                      phase: 'strength', secs: 45,  rounds: 3, detail: 'Max heart rate' },
-    REST30,
-    { name: 'Plank',                        phase: 'core',     secs: 60,  rounds: 2, detail: 'Brace hard' },
-    REST20,
-    ...CD_SHORT
-  ]},
-  D: { label: 'Day D – Ringcraft', pill: 'pd', color: '#FAC775', exercises: [
-    ...WU_DEF,
-    { name: 'Shadowboxing – full combos',   phase: 'boxing',   secs: 180, rounds: 3, detail: 'Pivots and level changes' },
-    RBTR60,
-    { name: 'Heavy bag – Feint & Counter',  phase: 'boxing',   secs: 180, rounds: 3, detail: 'Deceptive entry, then counter' },
-    RBTR60,
-    { name: 'Jump squats',                  phase: 'strength', secs: 45,  rounds: 3, detail: 'Explosive legs' },
-    REST30,
-    ...CD_SHORT
-  ]}
-};
-
-const WORKOUTS_ADV = {
-  A: { label: 'Day A – Power', pill: 'pa', color: '#E24B4A', exercises: [
-    ...WU_STD,
-    { name: 'Shadowboxing – full combos',   phase: 'boxing',   secs: 180, rounds: 4, detail: 'Max velocity' },
-    RBTR45,
-    { name: 'Heavy bag – Power Pyramid',    phase: 'boxing',   secs: 180, rounds: 4, detail: 'Heavy impact', noBack: true },
-    RBTR60,
-    { name: 'Diamond push-ups',             phase: 'strength', secs: 60,  rounds: 3, detail: 'Max reps' },
-    REST30,
-    { name: 'Jump squats',                  phase: 'strength', secs: 60,  rounds: 3, detail: 'Explosive power' },
-    REST30,
-    { name: 'Plank',                        phase: 'core',     secs: 90,  rounds: 2, detail: 'Total body tension' },
-    REST20,
-    ...CD_SHORT
-  ]},
-  B: { label: 'Day B – Speed', pill: 'pb', color: '#378ADD', exercises: [
-    ...WU_SB,
-    { name: 'Speed target – rapid jabs',    phase: 'boxing',   secs: 180, rounds: 4, detail: 'Nonstop hand speed' },
-    RBTR45,
-    { name: 'Shadowboxing – full speed',    phase: 'boxing',   secs: 180, rounds: 4, detail: 'Pro sparring pace' },
-    RBTR45,
-    { name: 'Burpees',                      phase: 'strength', secs: 60,  rounds: 3, detail: 'Sprint pace' },
-    REST30,
-    { name: 'Mountain climbers',            phase: 'core',     secs: 60,  rounds: 3, detail: 'Fast knees' },
-    REST20,
-    ...CD_SHORT
-  ]},
-  C: { label: 'Day C – Conditioning', pill: 'pc', color: '#639922', exercises: [
-    ...WU_DEF,
-    { name: 'Heavy bag – Tabata',           phase: 'boxing',   secs: 240, rounds: 4, detail: 'Interval sprints', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 180, rounds: 3, detail: 'No mercy', noBack: true },
-    RBTR60,
-    { name: 'Burpees',                      phase: 'strength', secs: 60,  rounds: 3, detail: 'Empty the tank' },
-    REST30,
-    { name: 'Plank',                        phase: 'core',     secs: 90,  rounds: 2, detail: 'Mental toughness' },
-    ...CD_SHORT
-  ]},
-  D: { label: 'Day D – Ringcraft', pill: 'pd', color: '#FAC775', exercises: [
-    ...WU_DEF,
-    { name: 'Shadowboxing – full combos',   phase: 'boxing',   secs: 180, rounds: 4, detail: 'Championship tempo' },
-    RBTR45,
-    { name: 'Heavy bag – Def. Counters',    phase: 'boxing',   secs: 180, rounds: 4, detail: 'Slip and Counter', noBack: true },
-    RBTR45,
-    { name: 'Conditioning – Sprawls',       phase: 'strength', secs: 60,  rounds: 3, detail: 'Max speed' },
-    REST30,
-    ...CD_SHORT
-  ]}
-};
-
-const HB_WUP = [
-  { name: 'Jump rope',                   phase: 'warmup',   secs: 120, rounds: 1, detail: 'Light pace' },
-  { name: 'Arm circles  shoulder rolls', phase: 'warmup',   secs: 60,  rounds: 1, detail: 'Full ROM' },
-  { name: 'Rest',                        phase: 'rest',     secs: 30,  rounds: 1, detail: '' },
-];
-const HB_CD = [{ name: 'Cool-down stretch', phase: 'cooldown', secs: 180, rounds: 1, detail: 'Full body recovery' }];
-
-const HB_DATA = {
-  HB_BEG_1: { label: 'HB 1', pill: 'pa', color: '#BA7517', exercises: [
-    ...HB_WUP,
-    { name: 'Heavy bag – Round 1',          phase: 'boxing',   secs: 120, rounds: 3, detail: 'Focus on Jab distance', noBack: true },
-    RBTR60,
-    { name: 'Heavy bag – Round 2',          phase: 'boxing',   secs: 120, rounds: 2, detail: 'Focus on 1-2 Combo', noBack: true },
-    RBTR60,
-    { name: 'Push-ups',                     phase: 'strength', secs: 30,  rounds: 3, detail: '8-12 reps' },
-    REST30,
-    { name: 'Plank',                        phase: 'core',     secs: 45,  rounds: 2, detail: 'Hold steady' },
-    ...HB_CD 
-  ]},
-  HB_BEG_2: { label: 'HB 2', pill: 'pa', color: '#BA7517', exercises: [
-    ...HB_WUP,
-    { name: 'Heavy bag – Round 3',          phase: 'boxing',   secs: 120, rounds: 3, detail: 'Focus on Lead Hook', noBack: true },
-    RBTR60,
-    { name: 'Heavy bag – body shots',       phase: 'boxing',   secs: 120, rounds: 2, detail: 'Bend knees, dig hooks' },
-    RBTR60,
-    { name: 'Bodyweight squats',            phase: 'strength', secs: 30,  rounds: 3, detail: '15 reps' },
-    REST30,
-    ...HB_CD 
-  ]},
-  HB_BEG_3: { label: 'HB 3', pill: 'pa', color: '#BA7517', exercises: [
-    ...HB_WUP,
-    { name: 'Heavy bag – power shots',      phase: 'boxing',   secs: 120, rounds: 3, detail: 'Full rotation, sit on punches' },
-    RBTR60,
-    { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 120, rounds: 2, detail: 'Continuous straight punches', noBack: true },
-    RBTR60,
-    { name: 'Walking lunges',               phase: 'strength', secs: 30,  rounds: 2, detail: 'Stay balanced' },
-    REST30,
-    ...HB_CD 
-  ]},
-  HB_INT_1: { label: 'HB 1', pill: 'pb', color: '#185FA5', exercises: [
-    ...HB_WUP,
-    { name: 'Heavy bag – Def. Counters',    phase: 'boxing',   secs: 180, rounds: 3, detail: 'Slip and Counter', noBack: true },
-    RBTR60,
-    { name: 'Heavy bag – Body Snatcher',    phase: 'boxing',   secs: 180, rounds: 2, detail: 'Level changing focus', noBack: true },
-    RBTR60,
-    { name: 'Push-ups – shoulder taps',     phase: 'strength', secs: 45,  rounds: 2, detail: 'Stability focus' },
-    REST30,
-    ...HB_CD 
-  ]},
-  HB_INT_2: { label: 'HB 2', pill: 'pb', color: '#185FA5', exercises: [
-    ...HB_WUP,
-    { name: 'Heavy bag – Level Mixing',     phase: 'boxing',   secs: 180, rounds: 3, detail: 'Head & Body combos' },
-    RBTR60,
-    { name: 'Heavy bag – Counters',          phase: 'boxing',   secs: 180, rounds: 2, detail: 'Catch and Reply', noBack: true },
-    RBTR60,
-    { name: 'Jump squats',                  phase: 'strength', secs: 45,  rounds: 2, detail: 'Explosive power' },
-    REST30,
-    ...HB_CD 
-  ]},
-  HB_INT_3: { label: 'HB 3', pill: 'pb', color: '#185FA5', exercises: [
-    ...HB_WUP,
-    { name: 'Heavy bag – Technical HIIT',   phase: 'boxing',   secs: 180, rounds: 3, detail: 'Explosive technique bursts', noBack: true },
-    RBTR60,
-    { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 180, rounds: 2, detail: 'Nonstop punches' },
-    RBTR60,
-    { name: 'Push-ups',                     phase: 'strength', secs: 60,  rounds: 2, detail: 'Max reps' },
-    REST30,
-    ...HB_CD 
-  ]},
-  HB_ADV_1: { label: 'HB 1', pill: 'pc', color: '#E24B4A', exercises: [
-    ...HB_WUP,
-    { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 180, rounds: 4, detail: 'Max intensity intervals', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – Tabata',           phase: 'boxing',   secs: 240, rounds: 2, detail: 'Sprints on the bag', noBack: true },
-    RBTR60,
-    { name: 'Burpees',                      phase: 'strength', secs: 60,  rounds: 3, detail: 'Max heart rate' },
-    REST30,
-    ...HB_CD 
-  ]},
-  HB_ADV_2: { label: 'HB 2', pill: 'pc', color: '#E24B4A', exercises: [
-    ...HB_WUP,
-    { name: 'Heavy bag – Technical HIIT',   phase: 'boxing',   secs: 180, rounds: 4, detail: 'Explosive speed', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – Body Snatcher',    phase: 'boxing',   secs: 180, rounds: 2, detail: 'Rip hooks & uppercuts' },
-    RBTR60,
-    { name: 'Jump squats',                  phase: 'strength', secs: 60,  rounds: 3, detail: 'Explosivity' },
-    REST30,
-    ...HB_CD 
-  ]},
-  HB_ADV_3: { label: 'HB 3', pill: 'pc', color: '#E24B4A', exercises: [
-    ...HB_WUP,
-    { name: 'Heavy bag – Tabata',           phase: 'boxing',   secs: 240, rounds: 4, detail: 'Interval sprints', noBack: true },
-    RBTR45,
-    { name: 'Heavy bag – Burnout',          phase: 'boxing',   secs: 180, rounds: 2, detail: 'No mercy', noBack: true },
-    RBTR60,
-    { name: 'Burpees',                      phase: 'strength', secs: 60,  rounds: 3, detail: 'Empty the tank' },
-    REST30,
-    ...HB_CD 
-  ]},
-};
-
-Object.assign(WORKOUTS_BEG, HB_DATA);
-Object.assign(WORKOUTS_INT, HB_DATA);
-Object.assign(WORKOUTS_ADV, HB_DATA);
-
-/* ── TRX DATA ── */
-const TRX_ROUTINES = {
-  1: {
-    title: 'Level 1: Mobility & Back Relief',
-    desc: 'Decompress lumbar spine and activate deep stabilizers.',
-    exercises: [
-      { name: 'TRX Standing Row – Slow', phase: 'warmup', secs: 60, rounds: 2, detail: 'Gentle lumbar traction, squeeze scaps' },
-      REST30,
-      { name: 'TRX Supported Glute Bridge', phase: 'strength', secs: 60, rounds: 3, detail: 'Heels in straps, lift hips' },
-      REST30,
-      { name: 'TRX Fallout (Kneeling)', phase: 'core', secs: 60, rounds: 2, detail: 'Engage abs, keep neutral spine' },
-      REST30,
-      { name: 'Cool-down stretch', phase: 'cooldown', secs: 120, rounds: 1, detail: 'Assisted child pose and chest stretch' }
-    ]
-  },
-  2: {
-    title: 'Level 2: Core Stability & Rotation',
-    desc: 'Build foundational core strength with anti-rotation control.',
-    exercises: [
-      { name: 'TRX Overhead Squat', phase: 'warmup', secs: 60, rounds: 2, detail: 'Deep squat with counterbalance' },
-      REST30,
-      { name: 'TRX Plank', phase: 'core', secs: 45, rounds: 3, detail: 'Feet in cradles, tight core' },
-      REST30,
-      { name: 'TRX Low Row', phase: 'strength', secs: 60, rounds: 3, detail: 'Pull elbows to ribcage' },
-      REST30,
-      { name: 'Cool-down stretch', phase: 'cooldown', secs: 120, rounds: 1, detail: 'Thoracic and hamstring stretches' }
-    ]
-  },
-  3: {
-    title: 'Level 3: Explosive Boxing Power',
-    desc: 'High-intensity rotational core strength for punch snap and stability.',
-    exercises: [
-      { name: 'TRX Explosive Row', phase: 'warmup', secs: 60, rounds: 3, detail: 'Explosive pull, slow return' },
-      REST30,
-      { name: 'TRX Atomic Push-Up', phase: 'strength', secs: 60, rounds: 3, detail: 'Push-up + knee tuck' },
-      REST30,
-      { name: 'TRX Mountain Climber', phase: 'core', secs: 60, rounds: 3, detail: 'Rapid knees to chest in straps' },
-      REST30,
-      { name: 'Cool-down stretch', phase: 'cooldown', secs: 180, rounds: 1, detail: 'Full body stretch flow' }
-    ]
-  }
-};
-
-let currentTrxLevel = 1;
-
-function setTrxLevel(lvl) {
-  currentTrxLevel = lvl;
-  [1, 2, 3].forEach(l => {
-    const btn = document.getElementById('trx-tab-' + l);
-    if (btn) btn.classList.toggle('active', l === lvl);
-  });
-  buildTrxView();
-}
-
-function buildTrxView() {
-  const routine = TRX_ROUTINES[currentTrxLevel];
-  const listEl = document.getElementById('trxExercisesList');
-  const titleEl = document.getElementById('trxLevelTitle');
-  if (titleEl) titleEl.textContent = routine.title;
-  if (!listEl) return;
-
-  listEl.innerHTML = routine.exercises.map((ex, idx) => {
-    if (ex.phase === 'rest') return '';
-    return `
-      <div class="exrow-t" style="margin-bottom:6px;">
-        <div class="exdot" style="background:${PHASE_META[ex.phase].color}"></div>
-        <div class="exname">${T(ex.name)}</div>
-        <div class="exdur2">${ex.rounds > 1 ? `${ex.rounds}×${fmt(ex.secs)}` : fmt(ex.secs)}</div>
-      </div>
-    `;
-  }).join('');
-}
-
-function startTrxWorkout() {
-  const routine = TRX_ROUTINES[currentTrxLevel];
-  // Inject into workouts as TRX Day
-  const currentWorkouts = getWorkouts();
-  currentWorkouts['TRX'] = {
-    label: routine.title,
-    pill: 'ptrx',
-    color: '#00C9A7',
-    exercises: routine.exercises
-  };
-  tActiveDay = 'TRX';
-  showView('timer');
-  buildTimerTabs();
-  renderExList();
-  loadEx(false);
-}
-
-/* ── STATE ── */
-const today = new Date();
-let viewYear = today.getFullYear();
-let viewMonth = today.getMonth();
-let selectedCalDay = null;
-let workoutDays = [1, 3, 5]; // Mon, Wed, Fri
-let dayOrder = ['A', 'B', 'C', 'D'];
-
-let tActiveDay = 'A';
-let tActiveEx = -1;
-let tRunning = false;
-let tInterval = null;
-let tRemaining = 0;
-let tRound = 1;
-let comboSeqId = null;
-let currentCombo = null;
-let audioCtx = null;
-let countdownInterval = null;
-let isCountingDown = false;
-let currentExAudio = null;
-let isSpeaking = false;
-let comboSpeedMultiplier = 1.0;
-let comboPauseMs = parseInt(localStorage.getItem('comboPauseMs') || '3000');
-let restMode = localStorage.getItem('restMode') || 'fixed';
-let restMinMs = parseInt(localStorage.getItem('restMinMs') || '1000');
-let restMaxMs = parseInt(localStorage.getItem('restMaxMs') || '5000');
-let restCountdownInterval = null;
-
-function getWeekOfProgram(date) {
-  const start = new Date(programStartDate);
-  const diffTime = Math.abs(date - start);
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  return Math.max(1, Math.ceil(diffDays / 7));
-}
-
-function getWorkoutsForDateRange(date) {
-  const progId = localStorage.getItem('activeProgramId') || 'classic';
-  if (progId === 'classic') {
-    const lvl = localStorage.getItem('fitnessLevel') || 'intermediate';
-    if (lvl === 'beginner') return WORKOUTS_BEG;
-    if (lvl === 'advanced') return WORKOUTS_ADV;
-    return WORKOUTS_INT;
-  }
-  const week = getWeekOfProgram(date);
-  if (progId === '6m-ba') {
-    if (week <= 8) return WORKOUTS_BEG;
-    if (week <= 16) return WORKOUTS_INT;
-    return WORKOUTS_ADV;
-  }
-  if (progId === '6m-bi') {
-    if (week <= 12) return WORKOUTS_BEG;
-    return WORKOUTS_INT;
-  }
-  if (progId === '6m-ia') {
-    if (week <= 12) return WORKOUTS_INT;
-    return WORKOUTS_ADV;
-  }
-  if (progId === '1y-ba') {
-    if (week <= 16) return WORKOUTS_BEG;
-    if (week <= 34) return WORKOUTS_INT;
-    return WORKOUTS_ADV;
-  }
-  return WORKOUTS_INT;
-}
-
-function getWorkouts() {
-  return getWorkoutsForDateRange(new Date());
-}
-
-function setLevel(level) {
-  localStorage.setItem('fitnessLevel', level);
-  highlightLevel();
-  if (sbClient && supabaseProfileId) {
-    sbClient.from('profiles').update({ fitness_level: level }).eq('id', supabaseProfileId).then();
-  }
-  stopTimer(); tActiveEx = -1; tRound = 1;
-  buildTimerTabs(); renderExList(); loadEx(false);
-}
-
-function highlightLevel() {
-  const level = localStorage.getItem('fitnessLevel') || 'intermediate';
-  ['beginner','intermediate','advanced'].forEach(l => {
-    const btn = document.getElementById('lvl-' + l);
-    if (btn) btn.classList.toggle('primary', l === level);
-  });
-}
-
-function updateSpeed(val) {
-  comboSpeedMultiplier = parseFloat(val);
-  const el = document.getElementById('speedVal');
-  if (el) el.textContent = val + 'x';
-}
-
-function fmtRestVal(num) {
-  return (num % 1 === 0 ? num.toFixed(0) : num.toFixed(1)) + 's';
-}
-
-function updatePause(val) {
-  comboPauseMs = parseFloat(val) * 1000;
-  localStorage.setItem('comboPauseMs', comboPauseMs);
-  const el = document.getElementById('pauseVal');
-  if (el) el.textContent = fmtRestVal(parseFloat(val));
-}
-
-function toggleRestMode() {
-  restMode = restMode === 'fixed' ? 'random' : 'fixed';
-  localStorage.setItem('restMode', restMode);
-  applyRestModeUI();
-}
-
-function applyRestModeUI() {
-  const fixedBtn = document.getElementById('restFixedBtn');
-  const randomBtn = document.getElementById('restRandomBtn');
-  const fixedCtrl = document.getElementById('restFixedControls');
-  const randomCtrl = document.getElementById('restRandomControls');
-  if (!fixedBtn) return;
-  if (restMode === 'fixed') {
-    fixedBtn.style.background = '#F5A623'; fixedBtn.style.color = '#000';
-    randomBtn.style.background = 'transparent'; randomBtn.style.color = 'var(--text-tertiary)';
-    fixedCtrl.style.display = 'flex';
-    randomCtrl.style.display = 'none';
-  } else {
-    fixedBtn.style.background = 'transparent'; fixedBtn.style.color = 'var(--text-tertiary)';
-    randomBtn.style.background = '#F5A623'; randomBtn.style.color = '#000';
-    fixedCtrl.style.display = 'none';
-    randomCtrl.style.display = 'block';
-  }
-}
-
-function updateRestMin(val) {
-  restMinMs = parseFloat(val) * 1000;
-  if (restMinMs > restMaxMs) {
-    restMaxMs = restMinMs;
-    localStorage.setItem('restMaxMs', restMaxMs);
-    document.getElementById('restMaxSlider').value = val;
-    document.getElementById('restMaxVal').textContent = fmtRestVal(parseFloat(val));
-  }
-  localStorage.setItem('restMinMs', restMinMs);
-  document.getElementById('restMinVal').textContent = fmtRestVal(parseFloat(val));
-}
-
-function updateRestMax(val) {
-  restMaxMs = parseFloat(val) * 1000;
-  if (restMaxMs < restMinMs) {
-    restMinMs = restMaxMs;
-    localStorage.setItem('restMinMs', restMinMs);
-    document.getElementById('restMinSlider').value = val;
-    document.getElementById('restMinVal').textContent = fmtRestVal(parseFloat(val));
-  }
-  localStorage.setItem('restMaxMs', restMaxMs);
-  document.getElementById('restMaxVal').textContent = fmtRestVal(parseFloat(val));
-}
-
-function getRestDuration() {
-  if (restMode === 'random') {
-    return restMinMs + Math.random() * (restMaxMs - restMinMs);
-  }
-  return comboPauseMs;
-}
-
-function renderRndInfo(ex) {
-  if (ex.rounds > 1) {
-    document.getElementById('rndInfo').innerHTML = `
-      <div style="display:inline-flex; align-items:center; gap:12px;">
-        <button class="nbtn" style="padding:4px 10px; font-size:12px; border-radius:4px; ${tRound <= 1 ? 'opacity:0.3; pointer-events:none;' : ''}" onclick="changeRound(-1)">&#9666;</button>
-        <span style="min-width:70px; text-align:center;">${T('Round')} ${tRound} ${T('of')} ${ex.rounds}</span>
-        <button class="nbtn" style="padding:4px 10px; font-size:12px; border-radius:4px; ${tRound >= ex.rounds ? 'opacity:0.3; pointer-events:none;' : ''}" onclick="changeRound(1)">&#9656;</button>
-      </div>
-    `;
-  } else {
-    document.getElementById('rndInfo').textContent = T(ex.detail) || '';
-  }
-}
-
-function changeRound(dir) {
-  if (tActiveEx < 0) return;
-  const ex = getWorkouts()[tActiveDay].exercises[tActiveEx];
-  if (!ex || ex.rounds <= 1) return;
-  
-  let newRound = tRound + dir;
-  if (newRound < 1 || newRound > ex.rounds) return;
-  
-  stopTimer();
-  tRound = newRound;
-  tRemaining = ex.secs;
-  document.getElementById('startBtn').textContent = T('Start');
-  document.getElementById('timeBig').textContent = fmt(tRemaining);
-  document.getElementById('ringFg').style.strokeDashoffset = CIRC;
-  renderRndInfo(ex);
-  if (ex.phase === 'boxing') {
-    currentCombo = generateNextCombo(ex);
-    renderChips(currentCombo, -1);
-  }
-}
-
-/* ── AUDIO & SOUND ENGINE ── */
-const PUNCH_SOUNDS = {
-  jab:          new Audio('audio/jab.mp3'),
-  cross:        new Audio('audio/cross.mp3'),
-  'lead-hook':  new Audio('audio/L_Hook.mp3'),
-  'rear-hook':  new Audio('audio/R_Hook.mp3'),
-  'lead-upper': new Audio('audio/L_Upper.mp3'),
-  'rear-upper': new Audio('audio/R_Upper.mp3'),
-  'body-jab':       new Audio('audio/Body_Jab.mp3'),
-  'body-cross':     new Audio('audio/Body_Cross.mp3'),
-  'body-lead-hook': new Audio('audio/Body_Lead_Hook.mp3'),
-  'body-rear-hook': new Audio('audio/Body_Rear_Hook.mp3'),
-  slip:         new Audio('audio/slip.mp3'),
-  roll:         new Audio('audio/Roll.mp3'),
-  feint:        new Audio('audio/Feint.mp3'),
-};
-
-function ensureAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-}
-
-function playPunch(key) {
-  triggerHaptic([35]);
-  if (audioMode === 'silent') return;
-  
-  if (audioMode === 'both' || audioMode === 'sfx') {
-    const s = PUNCH_SOUNDS[key];
-    if (s) {
-      const clone = s.cloneNode();
-      clone.play().catch(e => console.log('Audio play blocked:', e));
-    }
-  }
-  
-  if (audioMode === 'voice') {
-    try {
-      const word = PUNCH_DATA[key]?.word || key;
-      const u = new SpeechSynthesisUtterance(word);
-      u.rate = 1.3;
-      speechSynthesis.speak(u);
-    } catch (e) {}
-  }
-}
-
-function stopCurrentAudio() {
-  if (currentExAudio) {
-    currentExAudio.pause();
-    currentExAudio.currentTime = 0;
-    currentExAudio = null;
-  }
-  if (isSpeaking) {
-    window.speechSynthesis.cancel();
-    isSpeaking = false;
-  }
-}
-
-function playExerciseSound(name) {
-  if (audioMode === 'silent') return Promise.resolve();
-  stopCurrentAudio();
-
-  const tryPlay = (filename) => {
-    return new Promise((resolve, reject) => {
-      const safeFilename = filename.replace(/ /g, '_');
-      const s = new Audio(`audio/${safeFilename}.mp3`);
-      currentExAudio = s;
-      s.onended = () => { currentExAudio = null; resolve(); };
-      s.onerror = (e) => { currentExAudio = null; reject(e); };
-      s.play().catch(reject);
-    });
+/* ==========================================================================
+   Boxing Coach Pro — Studio Application Logic (v4.0)
+   Home Dashboard | Workouts & Gear Catalog | Fight Arena | Camp | Academy
+   ========================================================================== */
+(function () {
+  'use strict';
+
+  const T_CIRC = 2 * Math.PI * 88;    // Arena timer SVG r=88 -> 552.92
+  const MINI_CIRC = 2 * Math.PI * 24; // WHOOP ring SVG r=24 -> 150.80
+
+  const VIEW_TITLES = {
+    home: 'Home',
+    workouts: 'Workouts',
+    arena: 'Arena',
+    camp: 'Camp',
+    profile: 'Academy & Profile'
   };
 
-  let actualName = name;
-  if (name === 'Rest between rounds') actualName = 'rest';
-
-  const clean = (s) => s.toLowerCase().replace(/&/g, 'and').replace(/[–—\-]/g, ' ').replace(/\s+/g, ' ').trim();
-  const c = clean(actualName);
-  
-  const attempts = [
-    actualName,
-    actualName.toLowerCase(),
-    actualName.replace(/&/g, 'and').replace(/\s*[–—\-]\s*/g, '  '),
-    actualName.replace(/&/g, 'and').replace(/\s*[–—\-]\s*/g, ' '),
-    c,
-    c.replace(/\s/g, '  '), 
-    actualName.replace(/–/g, '-'),
-    actualName.toLowerCase().replace(/–/g, '-')
+  const MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
   ];
+  const DAY_SHORT_MON = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const DAY_ORDER_MON = [1, 2, 3, 4, 5, 6, 0];
 
-  return new Promise(async (resolve) => {
-    for (const a of attempts) {
-      try {
-        await tryPlay(a);
-        return resolve();
-      } catch (e) {}
-    }
-    
-    try {
-      isSpeaking = true;
-      const utterance = new SpeechSynthesisUtterance(name);
-      utterance.lang = currentLang === 'pt-PT' ? 'pt-PT' : 'en-US';
-      utterance.rate = 1.0;
-      utterance.onend = () => { isSpeaking = false; resolve(); };
-      utterance.onerror = () => { isSpeaking = false; resolve(); };
-      speechSynthesis.speak(utterance);
-    } catch (e) {
-      isSpeaking = false;
-      resolve();
-    }
-  });
-}
+  // --- UI & Navigation State ---
+  let curView = 'home';
+  const initNow = new Date();
+  let curYear = initNow.getFullYear();
+  let curMonth = initNow.getMonth();
+  let selectedDayKey = BoxingStorage.dateToDayKey(initNow);
 
-function playBell() {
-  triggerHaptic([100, 50, 100]);
-  if (audioMode === 'silent') return;
-  ensureAudio();
-  const o = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-  o.connect(g); g.connect(audioCtx.destination);
-  o.type = 'sine';
-  o.frequency.setValueAtTime(1200, audioCtx.currentTime);
-  g.gain.setValueAtTime(0.5, audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
-  o.start(); o.stop(audioCtx.currentTime + 2.0);
-}
+  let activeWorkoutCategory = 'all';
+  let activeWorkoutLevel = 'all';
+  let filterByMyGear = false;
+  let activeTrxPhase = 'pain-relief';
+  let activeProfileSubTab = 'academy';
+  let activeTechCategory = 'all';
+  let activeComboStyle = 'all';
+  let profileModalMode = 'add';
 
-function playTick() {
-  triggerHaptic([20]);
-  if (audioMode === 'silent') return;
-  ensureAudio();
-  const o = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-  o.connect(g); g.connect(audioCtx.destination);
-  o.type = 'sine';
-  o.frequency.setValueAtTime(800, audioCtx.currentTime);
-  g.gain.setValueAtTime(0.15, audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
-  o.start(); o.stop(audioCtx.currentTime + 0.1);
-}
+  // --- Arena / Live Session Timer State ---
+  let tWorkout = null;
+  let tExIdx = 0;
+  let tRound = 1;
+  let tRem = 0;
+  let tTotal = 0;
+  let tInRest = false;
+  let tRunning = false;
+  let tInt = null;
+  let comboScheduler = null;
+  let comboChildTimers = [];
+  let reflexMode = false;
+  let coachDrawerOpen = false;
+  let focusModeActive = false;
+  let sessionPunches = 0;
+  let roundPunches = 0;
+  let sessionElapsedSecs = 0;
+  let roundDurationStartSecs = 0;
+  let activeBoxingElapsedSecs = 0;
+  let currentRoundGoal = 90;
+  let currentComboCounted = false;
+  let lastSessionLogId = null;
+  let selectedRpe = 'solid';
+  let currentCornerTip = '';
 
-function playTimerSound(key) {
-  if (audioMode === 'silent') return Promise.resolve();
-  return new Promise((resolve) => {
-    const s = new Audio(`audio/timer/${key}.mp3`);
-    currentExAudio = s;
-    s.onended = () => { currentExAudio = null; resolve(); };
-    s.onerror = () => { currentExAudio = null; resolve(); };
-    s.play().catch(() => { currentExAudio = null; resolve(); });
-  });
-}
+  // --- Quick Interval Timer State ---
+  let qtRunning = false;
+  let qtPaused = false;
+  let qtPhase = 'prep';
+  let qtRem = 0;
+  let qtRound = 1;
+  let qtTotalRounds = 6;
+  let qtWorkSecs = 180;
+  let qtRestSecs = 60;
+  let qtInt = null;
+  let qtComboTimer = null;
 
-function playGo() {
-  triggerHaptic([60, 40, 60]);
-  if (audioMode === 'silent') return;
-  ensureAudio();
-  const o = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-  o.connect(g); g.connect(audioCtx.destination);
-  o.type = 'sine';
-  o.frequency.setValueAtTime(1200, audioCtx.currentTime);
-  o.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.3);
-  g.gain.setValueAtTime(0.3, audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
-  o.start(); o.stop(audioCtx.currentTime + 0.4);
-}
+  // --- Screen Wake Lock ---
+  let wakeLockSentinel = null;
+  let wakeLockDesired = false;
 
-function startCountdown(onComplete) {
-  isCountingDown = true;
-  let count = 5;
-  document.getElementById('startBtn').textContent = T('Cancel');
-  document.getElementById('tcName').textContent = T('Get Ready!');
-  document.getElementById('timeBig').textContent = count;
-  document.getElementById('rndInfo').textContent = T('Starting in...');
-  document.getElementById('ringFg').style.stroke = '#FFA500';
-  document.getElementById('ringFg').style.strokeDashoffset = 0;
-  document.getElementById('comboBox').style.display = 'none';
-  playTimerSound(count);
+  // --- Builders State ---
+  let customComboSeq = [];
+  let builderBlocks = [];
 
-  countdownInterval = setInterval(() => {
-    count--;
-    if (count > 0) {
-      document.getElementById('timeBig').textContent = count;
-      document.getElementById('ringFg').style.strokeDashoffset = CIRC * (1 - count / 5);
-      playTimerSound(count);
-    } else {
-      clearInterval(countdownInterval);
-      countdownInterval = null;
-      isCountingDown = false;
-      try { playGo(); } catch(e) {}
-      onComplete();
-    }
-  }, 1000);
-}
-
-/* ── STANDALONE QUICK INTERVAL BOXING TIMER ── */
-let intRunning = false;
-let intPaused = false;
-let intPhase = 'prep'; // 'prep', 'work', 'rest'
-let intCurrentRound = 1;
-let intTotalRounds = 6;
-let intWorkSecs = 180;
-let intRestSecs = 60;
-let intRemainingSecs = 5;
-let intIntervalTimer = null;
-
-function openQuickTimerModal() {
-  document.getElementById('quickTimerModal').style.display = 'flex';
-}
-
-function closeQuickTimerModal() {
-  if (!intRunning) {
-    document.getElementById('quickTimerModal').style.display = 'none';
-  } else {
-    // Keep running or confirm
-    document.getElementById('quickTimerModal').style.display = 'none';
+  // =========================================================================
+  // Core Helpers
+  // =========================================================================
+  function el(id) {
+    return document.getElementById(id);
   }
-}
 
-function startQuickTimerFromSettings() {
-  intWorkSecs = parseInt(document.getElementById('intRoundDur').value) || 180;
-  intRestSecs = parseInt(document.getElementById('intRestDur').value) || 60;
-  intTotalRounds = parseInt(document.getElementById('intRoundsCount').value) || 6;
-  startQuickTimer();
-}
-
-function startQuickTimer() {
-  ensureAudio();
-  requestWakeLock();
-  intRunning = true;
-  intPaused = false;
-  intPhase = 'prep';
-  intCurrentRound = 1;
-  intRemainingSecs = 5;
-
-  document.getElementById('intTimerSettings').style.display = 'none';
-  document.getElementById('intTimerDisplay').style.display = 'block';
-  document.getElementById('intPauseBtn').textContent = T('Pause');
-
-  updateQuickTimerUI();
-  playTimerSound(5);
-
-  if (intIntervalTimer) clearInterval(intIntervalTimer);
-  intIntervalTimer = setInterval(quickTimerTick, 1000);
-}
-
-function quickTimerTick() {
-  if (intPaused) return;
-  intRemainingSecs--;
-  
-  if (intPhase === 'prep') {
-    if (intRemainingSecs > 0) {
-      playTimerSound(intRemainingSecs);
-    } else {
-      intPhase = 'work';
-      intRemainingSecs = intWorkSecs;
-      playBell();
-    }
-  } else if (intPhase === 'work') {
-    if (intRemainingSecs === 10) {
-      playTick();
-    } else if ([3, 2, 1].includes(intRemainingSecs)) {
-      playTimerSound(intRemainingSecs);
-    } else if (intRemainingSecs <= 0) {
-      playBell();
-      if (intCurrentRound >= intTotalRounds) {
-        stopQuickTimer();
-        alert(T('Session complete! Great work, fighter!'));
-        return;
-      } else {
-        intPhase = 'rest';
-        intRemainingSecs = intRestSecs;
-      }
-    }
-  } else if (intPhase === 'rest') {
-    if (intRemainingSecs === 10) {
-      playTick();
-    } else if ([3, 2, 1].includes(intRemainingSecs)) {
-      playTimerSound(intRemainingSecs);
-    } else if (intRemainingSecs <= 0) {
-      intCurrentRound++;
-      intPhase = 'work';
-      intRemainingSecs = intWorkSecs;
-      playBell();
-    }
+  function tr(key) {
+    return typeof window.T === 'function' ? window.T(key) : key;
   }
-  updateQuickTimerUI();
-}
 
-function updateQuickTimerUI() {
-  const digits = document.getElementById('intTimeDigits');
-  const badge = document.getElementById('intPhaseBadge');
-  const info = document.getElementById('intRoundsInfo');
-  if (!digits || !badge || !info) return;
-
-  digits.textContent = fmt(intRemainingSecs);
-  info.textContent = `${T('Round')} ${intCurrentRound} ${T('of')} ${intTotalRounds}`;
-
-  badge.className = 'int-phase-badge';
-  if (intPhase === 'prep') {
-    badge.classList.add('int-phase-prep');
-    badge.textContent = T('Get Ready!');
-  } else if (intPhase === 'work') {
-    badge.classList.add('int-phase-work');
-    badge.textContent = T('WORK');
-  } else if (intPhase === 'rest') {
-    badge.classList.add('int-phase-rest');
-    badge.textContent = T('REST');
+  function escHtml(val) {
+    return String(val == null ? '' : val)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
-}
 
-function toggleQuickTimerPause() {
-  intPaused = !intPaused;
-  const btn = document.getElementById('intPauseBtn');
-  if (btn) btn.textContent = intPaused ? T('Resume') : T('Pause');
-}
+  function fmtTime(secs) {
+    const s = Math.max(0, Math.floor(Number(secs) || 0));
+    const hrs = Math.floor(s / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const rem = s % 60;
+    if (hrs > 0) {
+      return `${hrs}:${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
+    }
+    return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
+  }
 
-function stopQuickTimer() {
-  intRunning = false;
-  intPaused = false;
-  if (intIntervalTimer) { clearInterval(intIntervalTimer); intIntervalTimer = null; }
-  if (!tRunning && !wakeLockManual) releaseWakeLock();
-  
-  document.getElementById('intTimerSettings').style.display = 'block';
-  document.getElementById('intTimerDisplay').style.display = 'none';
-}
+  function fmtHumanDuration(totalSecs) {
+    const mins = Math.max(1, Math.round((Number(totalSecs) || 0) / 60));
+    if (mins < 60) return `${mins} min`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m === 0 ? `${h}h` : `${h}h ${m}m`;
+  }
 
-/* ── CUSTOM COMBO BUILDER ── */
-let currentCustomSeq = [];
+  function showToast(message, type) {
+    const container = el('toastContainer');
+    if (!container) return;
+    const item = document.createElement('div');
+    item.className = 'toast-item' + (type === 'warn' ? ' warn' : type === 'err' ? ' err' : '');
+    item.textContent = message;
+    container.appendChild(item);
+    setTimeout(() => {
+      if (item.parentNode) item.parentNode.removeChild(item);
+    }, 3200);
+  }
 
-function openCustomComboModal() {
-  document.getElementById('comboBuilderModal').style.display = 'flex';
-  const selector = document.getElementById('comboPunchSelector');
-  if (selector) {
-    selector.innerHTML = Object.keys(PUNCH_DATA).map(key => {
-      const p = PUNCH_DATA[key];
-      return `<button onclick="addPunchToCustomCombo('${key}')" class="pchip ${p.chip}" style="cursor:pointer; border:1px solid rgba(255,255,255,0.2);">${p.label}</button>`;
+  function setActiveButtons(pairs) {
+    pairs.forEach(([id, isActive]) => {
+      const node = el(id);
+      if (node) node.classList.toggle('active', !!isActive);
+    });
+  }
+
+  function gearIconsHtml(gearIds) {
+    const list = Array.isArray(gearIds) ? gearIds : [];
+    const map = {};
+    BoxingWorkouts.EQUIPMENT_CATALOG.forEach(g => { map[g.id] = g; });
+    return list.map(id => {
+      const g = map[id];
+      return g ? `<span class="meta-chip" title="${escHtml(tr(g.label))}">${g.icon} ${escHtml(tr(g.label))}</span>` : '';
     }).join('');
   }
-  currentCustomSeq = [];
-  renderCustomComboSeq();
-}
 
-function closeCustomComboModal() {
-  document.getElementById('comboBuilderModal').style.display = 'none';
-}
-
-function addPunchToCustomCombo(key) {
-  if (currentCustomSeq.length >= 8) return;
-  currentCustomSeq.push(key);
-  playPunch(key);
-  renderCustomComboSeq();
-}
-
-function clearCustomComboSeq() {
-  currentCustomSeq = [];
-  renderCustomComboSeq();
-}
-
-function renderCustomComboSeq() {
-  const container = document.getElementById('customComboSequence');
-  if (!container) return;
-  if (currentCustomSeq.length === 0) {
-    container.innerHTML = `<span style="font-size:12px; color:var(--text-tertiary);">No punches added yet</span>`;
-    return;
+  function getExerciseInfoEntry(ex) {
+    if (!ex) return null;
+    const dict = BoxingData.EXERCISE_INFO[ex.name];
+    if (dict) return dict;
+    if (ex.info || ex.warn) {
+      return { equip: 'TRX / Body', goal: ex.detail || '', cue: ex.info || '', warn: ex.warn || null };
+    }
+    return null;
   }
-  container.innerHTML = currentCustomSeq.map((k, i) => {
-    const p = PUNCH_DATA[k];
-    return `<div class="pchip ${p.chip}" onclick="removePunchFromCustomCombo(${i})" style="cursor:pointer;" title="Tap to remove">${p.label} &times;</div>`;
-  }).join('');
-}
 
-function removePunchFromCustomCombo(i) {
-  currentCustomSeq.splice(i, 1);
-  renderCustomComboSeq();
-}
-
-function testPlayCustomCombo() {
-  if (currentCustomSeq.length === 0) return;
-  let delay = 100;
-  currentCustomSeq.forEach(p => {
-    setTimeout(() => {
-      playPunch(p);
-    }, delay);
-    delay += (PUNCH_DATA[p]?.delay || 500) / comboSpeedMultiplier;
-  });
-}
-
-function saveCustomCombo() {
-  const nameInput = document.getElementById('customComboName');
-  const name = nameInput.value.trim() || `Custom Combo (${currentCustomSeq.map(p => PUNCH_DATA[p].label).join('-')})`;
-  if (currentCustomSeq.length === 0) {
-    alert('Please add at least 1 punch to the combo.');
-    return;
-  }
-  const activeProf = userProfiles.find(p => p.id === activeUserId);
-  if (!activeProf.customCombos) activeProf.customCombos = [];
-  activeProf.customCombos.push({ name, punches: [...currentCustomSeq] });
-  localStorage.setItem('boxingProfiles', JSON.stringify(userProfiles));
-  closeCustomComboModal();
-  alert(`Combo "${name}" saved and added to workout generator!`);
-}
-
-/* ── GAMIFICATION & BADGES ── */
-const BADGES = [
-  { id: 'first_blood', name: 'First Blood', icon: '🥊', desc: 'Completed first workout', check: (c) => Object.keys(c).length >= 1 },
-  { id: 'streak_3', name: '3-Day Streak', icon: '🔥', desc: '3 scheduled days completed', check: (c, s) => s >= 3 },
-  { id: 'streak_7', name: 'Iron Will', icon: '⚡', desc: '7-day training streak', check: (c, s) => s >= 7 },
-  { id: 'heavy_hitter', name: 'Heavy Hitter', icon: '💥', desc: '2,500 estimated punches', check: (c) => Object.keys(c).length * 150 >= 2500 },
-  { id: 'golden_gloves', name: 'Golden Gloves', icon: '👑', desc: '10,000 estimated punches', check: (c) => Object.keys(c).length * 150 >= 10000 },
-  { id: 'centurion', name: 'Centurion', icon: '🏆', desc: 'Completed 20 full sessions', check: (c) => Object.keys(c).length >= 20 },
-];
-
-function buildBadgesGrid() {
-  const grid = document.getElementById('badgesGrid');
-  if (!grid) return;
-  const count = Object.keys(completed).length;
-  grid.innerHTML = BADGES.map(b => {
-    const isUnlocked = b.check(completed, count);
+  function buildExerciseInfoHtml(ex) {
+    const info = getExerciseInfoEntry(ex);
+    if (!info) return '';
     return `
-      <div class="badge-card ${isUnlocked ? 'unlocked' : ''}">
-        <div class="badge-icon" style="${isUnlocked ? '' : 'filter:grayscale(1); opacity:0.4;'}">${b.icon}</div>
-        <div class="badge-name">${T(b.name)}</div>
-        <div class="badge-desc">${T(b.desc)}</div>
+      <div><strong>${escHtml(tr('Equipment'))}:</strong> ${escHtml(tr(info.equip || 'Bodyweight'))}</div>
+      ${info.goal ? `<div><strong>${escHtml(tr('Goal'))}:</strong> ${escHtml(tr(info.goal))}</div>` : ''}
+      ${info.cue ? `<div><strong>${escHtml(tr('Form Cue'))}:</strong> ${escHtml(tr(info.cue))}</div>` : ''}
+      ${info.warn ? `<span class="back-warn">⚠ ${escHtml(tr(info.warn))}</span>` : ''}
+    `;
+  }
+
+  function resolveWorkoutByAnyId(id, dateObj, profile) {
+    if (!id) return null;
+    const prof = profile || BoxingStorage.getActiveProfile();
+    const dt = dateObj || new Date();
+    const dur = prof.sessionDuration || 60;
+
+    if (String(id).startsWith('trx:')) {
+      const key = String(id).slice(4);
+      const r = BoxingWorkouts.TRX_ROUTINES[key];
+      if (!r) return null;
+      return {
+        id,
+        category: 'trx',
+        label: r.title,
+        subtitle: r.shortLabel,
+        focus: r.desc,
+        color: r.color || '#00D2B4',
+        gearIds: ['trx'],
+        exercises: (r.exercises || []).map(e => ({ ...e }))
+      };
+    }
+
+    const custom = (prof.customWorkouts || []).find(w => w.id === id);
+    if (custom) {
+      return { ...custom, gearIds: BoxingWorkouts.inferGearIds(custom) };
+    }
+
+    const lib = BoxingWorkouts.LIBRARY_WORKOUTS.find(w => w.id === id);
+    if (lib) {
+      return BoxingWorkouts.scaleWorkoutToDuration(lib, dur);
+    }
+
+    return BoxingWorkouts.getWorkoutById(id, dt, prof, dur);
+  }
+
+  // =========================================================================
+  // Shared Cover Card Renderer (Home Carousels & Workouts Catalog)
+  // =========================================================================
+  function buildWorkoutCoverCardHtml(rawWo, options) {
+    const opts = options || {};
+    const stats = BoxingWorkouts.calcWorkoutStats(rawWo);
+    const coverUrl = opts.coverOverride || BoxingWorkouts.getWorkoutCover(rawWo);
+    const levelLabel = rawWo.level ? tr(rawWo.level[0].toUpperCase() + rawWo.level.slice(1)) : tr('All');
+    const isActive = tWorkout && (tWorkout.id === rawWo.id);
+    const roundBadge = stats.boxingRounds > 0
+      ? `${stats.boxingRounds} ${tr('Rnds')}`
+      : `${stats.totalWorkRounds} ${tr('Sets')}`;
+    const gearBadges = gearIconsHtml((rawWo.gearIds || BoxingWorkouts.inferGearIds(rawWo)).slice(0, 3));
+    const safeId = escHtml(rawWo.id);
+    const isCustom = !!opts.isCustom;
+
+    return `
+      <div class="cover-card ${isActive ? 'active-wo' : ''}" onclick="launchWorkoutById('${safeId}')">
+        <div class="cover-media">
+          <img src="${escHtml(coverUrl)}" alt="${escHtml(tr(rawWo.label))}" loading="lazy">
+          <div class="cover-badges-top">
+            <span class="dpill ${escHtml(rawWo.pill || 'pa')}">${escHtml(levelLabel)}</span>
+            <span class="dur-badge-overlay">⏱ ${escHtml(fmtHumanDuration(stats.totalSecs))} · ${escHtml(roundBadge)}</span>
+          </div>
+        </div>
+        <div class="cover-body">
+          <div class="cover-title">${escHtml(tr(rawWo.label))}</div>
+          <div class="cover-sub">${escHtml(tr(rawWo.subtitle || rawWo.focus || ''))}</div>
+          <div class="cover-meta">${gearBadges}</div>
+          <div class="cover-foot">
+            <button type="button" class="stbtn" onclick="event.stopPropagation(); launchWorkoutById('${safeId}')">▶ ${escHtml(tr('Start'))}</button>
+            ${isCustom ? `<button type="button" class="info-btn" title="Delete" onclick="event.stopPropagation(); deleteCustomWorkout('${safeId}')">🗑</button>` : ''}
+          </div>
+        </div>
       </div>
     `;
-  }).join('');
-}
+  }
 
-/* ── DATA BACKUP & PORTABILITY ── */
-function exportDataJSON() {
-  const exportPayload = {
-    app: 'BoxingCoachPRO',
-    version: '2.0.0',
-    exportDate: new Date().toISOString(),
-    profiles: userProfiles,
-    activeUserId,
-    completedWorkouts: completed,
-    programStartDate,
-    fitnessLevel: localStorage.getItem('fitnessLevel') || 'intermediate',
-    activeProgramId: localStorage.getItem('activeProgramId') || 'classic',
-    workoutDays,
-    dayOrder
-  };
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportPayload, null, 2));
-  const downloadAnchor = document.createElement('a');
-  downloadAnchor.setAttribute("href", dataStr);
-  downloadAnchor.setAttribute("download", `boxing_coach_backup_${new Date().toISOString().split('T')[0]}.json`);
-  document.body.appendChild(downloadAnchor);
-  downloadAnchor.click();
-  downloadAnchor.remove();
-}
+  // =========================================================================
+  // Navigation & Chrome
+  // =========================================================================
+  function showView(viewName) {
+    if (!VIEW_TITLES[viewName]) viewName = 'home';
+    curView = viewName;
 
-function importDataJSON(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(e) {
+    document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.view === viewName);
+    });
+    document.querySelectorAll('.mnav-item[data-view]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.view === viewName);
+    });
+    document.querySelectorAll('.view').forEach(sec => {
+      sec.classList.toggle('active', sec.id === `view-${viewName}`);
+    });
+
+    const titleNode = el('topbarViewTitle');
+    if (titleNode) titleNode.textContent = tr(VIEW_TITLES[viewName]);
+
+    if (viewName === 'home') renderHomeView();
+    else if (viewName === 'workouts') renderWorkoutsView();
+    else if (viewName === 'arena') renderArenaView();
+    else if (viewName === 'camp') renderCampView();
+    else if (viewName === 'profile') renderProfileView();
+
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }
+
+  function updateTopbarChrome() {
+    const store = BoxingStorage.getStore();
+    const prof = BoxingStorage.getActiveProfile();
+    const stats = BoxingStorage.getFighterStats(prof);
+    const rank = BoxingStorage.getFighterRank(stats);
+    const dur = Number(prof.sessionDuration) || 60;
+
+    // Sidebar Rank Card
+    const rankCard = el('sidebarRankCard');
+    if (rankCard) {
+      rankCard.innerHTML = `
+        <div class="sr-top">
+          <span class="sr-rank">${escHtml(tr(rank.rank))}</span>
+          <span class="sr-xp">${rank.xp.toLocaleString()} XP</span>
+        </div>
+        <div class="sr-bar"><div class="sr-fill" style="width:${rank.pct}%"></div></div>
+        <div class="sr-xp">${rank.nextRank ? `${escHtml(tr('Next'))}: ${escHtml(tr(rank.nextRank))} (${rank.nextXp.toLocaleString()} XP)` : escHtml(tr('Max Rank'))}</div>
+      `;
+    }
+
+    const sub = el('headerCampSub');
+    if (sub) {
+      const stanceTxt = prof.stance === 'southpaw' ? tr('Southpaw') : tr('Orthodox');
+      sub.textContent = `${prof.name} · ${tr(rank.rank)} · ${stanceTxt} · ${dur === 60 ? '1h' : dur === 90 ? '1h 30m' : '2h'}`;
+    }
+
+    setActiveButtons([
+      ['topDur-60', dur === 60],
+      ['topDur-90', dur === 90],
+      ['topDur-120', dur === 120],
+      ['catDur-60', dur === 60],
+      ['catDur-90', dur === 90],
+      ['catDur-120', dur === 120],
+      ['pref-dur-60', dur === 60],
+      ['pref-dur-90', dur === 90],
+      ['pref-dur-120', dur === 120]
+    ]);
+
+    const stanceBtn = el('stanceToggleBtn');
+    const stanceTxtNode = el('stanceToggleText');
+    if (stanceBtn) stanceBtn.classList.toggle('southpaw', prof.stance === 'southpaw');
+    if (stanceTxtNode) stanceTxtNode.textContent = tr(prof.stance === 'southpaw' ? 'Southpaw' : 'Orthodox');
+
+    const langSel = el('langSelect');
+    if (langSel) langSel.value = store.lang || 'en';
+
+    const userSel = el('userSelect');
+    if (userSel) {
+      const opts = (store.profiles || []).map(p =>
+        `<option value="${escHtml(p.id)}" ${p.id === store.activeUserId ? 'selected' : ''}>${escHtml(p.name)}</option>`
+      );
+      opts.push(`<option value="__new__">+ ${escHtml(tr('New Fighter Profile'))}</option>`);
+      opts.push(`<option value="__rename__">✎ ${escHtml(tr('Rename Active'))}</option>`);
+      userSel.innerHTML = opts.join('');
+    }
+
+    const am = prof.audioMode || 'both';
+    setActiveButtons([
+      ['am-both', am === 'both'],
+      ['am-sfx', am === 'sfx'],
+      ['am-voice', am === 'voice'],
+      ['am-silent', am === 'silent']
+    ]);
+
+    const csBtn = el('calloutStyleBtn');
+    const csVal = el('calloutStyleVal');
+    if (csVal) csVal.textContent = prof.calloutStyle === 'numbers' ? tr('1-2-3 Numbers') : tr('Names');
+    if (csBtn) csBtn.classList.toggle('active', prof.calloutStyle === 'numbers');
+
+    const aaBtn = el('autoAdvanceBtn');
+    const aaVal = el('autoAdvanceVal');
+    const aaOn = prof.autoAdvance !== false;
+    if (aaVal) aaVal.textContent = aaOn ? 'ON' : 'OFF';
+    if (aaBtn) aaBtn.classList.toggle('active', aaOn);
+
+    const rfBtn = el('reflexModeBtn');
+    const rfVal = el('reflexModeVal');
+    if (rfVal) rfVal.textContent = reflexMode ? 'ON' : 'OFF';
+    if (rfBtn) rfBtn.classList.toggle('active', reflexMode);
+  }
+
+  function setSessionDuration(mins) {
+    const valid = [60, 90, 120].includes(Number(mins)) ? Number(mins) : 60;
+    BoxingStorage.updateActiveProfile({ sessionDuration: valid });
+    updateTopbarChrome();
+    if (curView === 'home') renderHomeView();
+    else if (curView === 'workouts') renderWorkoutsView();
+    else if (curView === 'camp') renderCampView();
+    else if (curView === 'profile') renderProfileView();
+    showToast(`${tr('Session Duration')}: ${valid === 60 ? '1h' : valid === 90 ? '1h 30m' : '2h'}`);
+  }
+
+  function toggleStanceQuick() {
+    const prof = BoxingStorage.getActiveProfile();
+    const next = prof.stance === 'southpaw' ? 'orthodox' : 'southpaw';
+    BoxingStorage.updateActiveProfile({ stance: next });
+    updateTopbarChrome();
+    if (curView === 'arena') renderArenaView();
+    if (curView === 'profile') renderProfileView();
+    showToast(`${tr('Preferred Stance')}: ${tr(next === 'southpaw' ? 'Southpaw' : 'Orthodox')}`);
+  }
+
+  function changeLanguage(lang) {
+    const store = BoxingStorage.getStore();
+    store.lang = lang === 'pt-PT' ? 'pt-PT' : 'en';
+    BoxingStorage.saveStore(store);
+    if (typeof window.applyTranslations === 'function') window.applyTranslations();
+    updateTopbarChrome();
+    showView(curView);
+  }
+
+  function handleUserSelect(val) {
+    if (val === '__new__') {
+      openProfileModal('add');
+      return;
+    }
+    if (val === '__rename__') {
+      openProfileModal('rename');
+      return;
+    }
+    BoxingStorage.switchProfile(val);
+    updateTopbarChrome();
+    showView(curView);
+    const prof = BoxingStorage.getActiveProfile();
+    showToast(`${tr('Profile')}: ${prof.name}`);
+  }
+
+  // =========================================================================
+  // Wake Lock
+  // =========================================================================
+  async function requestWakeLock() {
+    if (!('navigator' in window) || !('wakeLock' in navigator)) return false;
     try {
-      const data = JSON.parse(e.target.result);
-      if (data.profiles) {
-        userProfiles = data.profiles;
-        localStorage.setItem('boxingProfiles', JSON.stringify(userProfiles));
-      }
-      if (data.completedWorkouts) {
-        completed = data.completedWorkouts;
-      }
-      if (data.workoutDays) workoutDays = data.workoutDays;
-      if (data.dayOrder) dayOrder = data.dayOrder;
-      if (data.programStartDate) {
-        programStartDate = data.programStartDate;
-        localStorage.setItem('programStartDate', programStartDate);
-      }
-      alert('Data backup successfully restored!');
-      window.location.reload();
-    } catch (err) {
-      alert('Failed to parse backup file: ' + err.message);
-    }
-  };
-  reader.readAsText(file);
-}
-
-/* ── COMBO LOGIC & HELPERS ── */
-function getAllowedPunches(exName, exDetail) {
-  const text = (exName + ' ' + (exDetail || '')).toLowerCase();
-  
-  if (text.includes('1-2 basics') || text.includes('round 2')) return ['jab', 'cross'];
-  if (text.includes('round 1') || text.includes('rapid jabs')) return ['jab'];
-  if (text.includes('1-2-3 combos') || text.includes('round 3')) return ['jab', 'cross', 'lead-hook'];
-  if (text.includes('lead hook')) return ['lead-hook'];
-  if (text.includes('rear hook')) return ['rear-hook'];
-  if (text.includes('lead uppercut')) return ['lead-upper'];
-  if (text.includes('rear uppercut')) return ['rear-upper'];
-  if (text.includes('slips and rolls')) return ['jab', 'cross', 'slip', 'roll'];
-  if (text.includes('body shots') || text.includes('body snatcher')) {
-    return ['body-jab', 'body-cross', 'body-lead-hook', 'body-rear-hook', 'lead-hook', 'cross'];
-  }
-  if (text.includes('defensive') || text.includes('counters') || text.includes('def. counters')) {
-    return ['slip', 'roll', 'feint', 'cross', 'lead-hook', 'lead-upper', 'rear-upper'];
-  }
-  return Object.keys(PUNCH_DATA);
-}
-
-function generateNextCombo(ex) {
-  const allowed = getAllowedPunches(ex.name, ex.detail);
-  const pool = getCombosForLevel().filter(c => c.punches.every(p => allowed.includes(p)));
-  if (pool.length > 0) {
-    return pool[Math.floor(Math.random() * pool.length)];
-  }
-  const randomPunches = [];
-  const length = Math.floor(Math.random() * 3) + 2;
-  for (let i = 0; i < length; i++) {
-    randomPunches.push(allowed[Math.floor(Math.random() * allowed.length)]);
-  }
-  return {
-    name: 'Dynamic Combo',
-    punches: randomPunches
-  };
-}
-
-function fmt(s) {
-  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
-}
-function dayKey(y, m, d) { return y + '-' + m + '-' + d; }
-
-function getWorkoutForDate(y, m, d) {
-  const dow = new Date(y, m, d).getDay();
-  const idx = workoutDays.indexOf(dow);
-  if (idx === -1) return 'R';
-  return dayOrder[idx % dayOrder.length] || 'R';
-}
-
-function showView(v) {
-  document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('.tab-bar .tab').forEach(el => el.classList.remove('active'));
-  
-  const target = document.getElementById('view-' + v);
-  if (target) target.classList.add('active');
-  
-  const mapping = { calendar: 0, timer: 1, trx: 2, technique: 3, settings: 4 };
-  const idx = mapping[v];
-  if (idx !== undefined) {
-    const mainTabs = document.querySelectorAll('.tab-bar .tab');
-    if (mainTabs[idx]) mainTabs[idx].classList.add('active');
-  }
-  
-  if (v === 'calendar') buildCalendar();
-  if (v === 'timer') { buildTimerTabs(); renderExList(); loadEx(false); }
-  if (v === 'trx') buildTrxView();
-  if (v === 'technique') buildTechnique();
-  if (v === 'settings') { buildSettings(); buildBadgesGrid(); }
-}
-
-function buildTechnique() {
-  const grid = document.getElementById('techniqueGrid');
-  if (!grid) return;
-  grid.innerHTML = PUNCH_LIBRARY.map(p => `
-    <div class="tech-card">
-      <div class="tech-title">
-        ${T(p.name)}
-        <a href="${p.yt}" target="_blank" class="tech-btn">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-          ${T('Video')}
-        </a>
-      </div>
-      <div class="tech-desc">${T(p.desc)}</div>
-      <div class="tech-tips">
-        ${p.tips.map(t => `<div class="tech-tip">${T(t)}</div>`).join('')}
-      </div>
-    </div>
-  `).join('');
-}
-
-function shiftMonth(dir) {
-  viewMonth += dir;
-  if (viewMonth > 11) { viewMonth = 0; viewYear++; }
-  if (viewMonth < 0) { viewMonth = 11; viewYear--; }
-  buildCalendar();
-}
-
-function buildCalendar() {
-  const y = viewYear, mo = viewMonth;
-  document.getElementById('calTitle').textContent = T(MONTHS[mo]) + ' ' + y;
-  document.getElementById('dhRow').innerHTML = DNAMES.map(d => `<div class="dh">${d}</div>`).join('');
-
-  const firstDay = new Date(y, mo, 1).getDay();
-  const dim = new Date(y, mo + 1, 0).getDate();
-  let sess = 0, done = 0, streak = 0;
-  let html = '';
-
-  for (let i = 0; i < firstDay; i++) html += `<div class="dc empty"></div>`;
-
-  for (let d = 1; d <= dim; d++) {
-    const wt = getWorkoutForDate(y, mo, d);
-    const dk = dayKey(y, mo, d);
-    const isToday = y === today.getFullYear() && mo === today.getMonth() && d === today.getDate();
-    const isSel = selectedCalDay === dk;
-    const isDone = !!completed[dk];
-    const date = new Date(y, mo, d);
-    const isPast = date <= today;
-
-    if (wt !== 'R') sess++;
-    if (wt !== 'R' && isDone) done++;
-    if (isPast && wt !== 'R' && isDone) streak++;
-
-    let cls = 'dc' + (isToday ? ' today' : '') + (isSel ? ' sel' : '');
-    const currentWorkouts = getWorkouts();
-    const pillCls = wt === 'R' ? 'pr' : (currentWorkouts[wt]?.pill || 'pa');
-    const pillLbl = wt === 'R' ? T('Rest') : T('Day ' + wt);
-    const focusTxt = wt === 'A' ? T('Power') : wt === 'B' ? T('Speed') : wt === 'C' ? T('Cond.') : wt === 'D' ? T('Ring.') : '';
-
-    html += `<div class="${cls}" onclick="calSelect('${dk}',${d})" id="dc-${dk}">
-      <div class="dn">${d}</div>
-      <div class="dpill ${pillCls}">${pillLbl}</div>
-      ${wt !== 'R' ? `<div class="dfocus">${focusTxt}</div>` : ''}
-      ${isDone ? `<div class="dcheck"><div class="dtick"></div></div>` : ''}
-    </div>`;
-  }
-
-  const trailing = (firstDay + dim) % 7 === 0 ? 0 : 7 - (firstDay + dim) % 7;
-  for (let i = 0; i < trailing; i++) html += `<div class="dc empty"></div>`;
-  document.getElementById('calGrid').innerHTML = html;
-
-  document.getElementById('sSess').textContent = sess;
-  document.getElementById('sDone').textContent = done;
-  document.getElementById('sHrs').textContent = (done * 1);
-  document.getElementById('sStr').textContent = streak + 'd';
-}
-
-function calSelect(dk, d) {
-  selectedCalDay = dk;
-  const parts = dk.split('-');
-  const y = parseInt(parts[0]), mo = parseInt(parts[1]);
-  const wt = getWorkoutForDate(y, mo, d);
-  const isDone = !!completed[dk];
-  const dateStr = T(MONTHS[mo]) + ' ' + d + ', ' + y;
-
-  const currentWorkouts = getWorkoutsForDateRange(new Date(y, mo, d));
-  const woLevel = currentWorkouts === WORKOUTS_BEG ? 'Beginner' : currentWorkouts === WORKOUTS_INT ? 'Intermediate' : 'Advanced';
-  const weekNum = getWeekOfProgram(new Date(y, mo, d));
-
-  let html = `<div class="detail-panel">
-    <div class="dp-hd">
-      <div>
-        <div class="dp-sub">${T(dateStr)} • ${T('Week')} ${weekNum} • ${T(woLevel)}</div>
-        <div class="dp-title">${wt === 'R' ? T('Rest day') : T('Day ' + wt) + ' – ' + T(wt === 'A' ? 'Power' : wt === 'B' ? 'Speed' : wt === 'C' ? 'Cond.' : 'Ringcraft')}</div>
-      </div>
-      <div class="dp-actions">`;
-
-  if (wt !== 'R') {
-    html += `<button class="mkbtn${isDone ? ' done' : ''}" onclick="toggleDone('${dk}')">${isDone ? T('Completed') : T('Mark done')}</button>
-      <button class="stbtn" onclick="launchTimer('${wt}')">${T('Start')}</button>`;
-  }
-
-  html += `</div></div>`;
-
-  if (wt === 'R') {
-    html += `<div style="font-size:13px;color:var(--text-secondary)">${T('Active recovery day. Light walk, mobility work, or full rest.')}</div>`;
-  } else {
-    const wo = currentWorkouts[wt];
-    let lastPh = null;
-    html += `<div>`;
-    if (wo && wo.exercises) {
-      wo.exercises.forEach(ex => {
-        const ph = ex.phase;
-        if (ph !== 'rest' && ph !== lastPh) { html += `<div class="ph-lbl">${T(PHASE_META[ph].label)}</div>`; lastPh = ph; }
-        if (ph === 'rest') return;
-        const info = EXERCISE_INFO[ex.name];
-        const ytLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(ex.name + ' boxing tutorial')}`;
-        const rnd = ex.rounds > 1 ? `${ex.rounds}×${fmt(ex.secs)}` : fmt(ex.secs);
-        const safeId = ex.name.replace(/\W/g, '');
-        html += `<div class="exrow" style="flex-wrap:wrap;cursor:pointer" onclick="toggleInfo(event,'eip_cal_${safeId}')">
-          <div class="ephase ${PHASE_META[ph].cls}">${T(PHASE_META[ph].label).slice(0,4)}</div>
-          <div style="flex:1;font-size:12px;color:var(--text-primary)">
-            ${T(ex.name)}${ex.noBack ? ` <span style="color:#F5A623;font-size:10px;font-weight:700">(${T('Back Care')} ⚠️)</span>` : ''}
-            ${ex.detail ? `<div style="font-size:11px;color:var(--text-secondary);font-weight:400">${T(ex.detail)}</div>` : ''}
-          </div>
-          <div class="edur">${rnd}</div>
-          <div class="info-panel" id="eip_cal_${safeId}">${T(info || '')}<br><a href="${ytLink}" target="_blank" style="display:inline-block;margin-top:6px;color:#ffffff;font-weight:700;text-decoration:none;">&#9654; Video Tutorial</a></div>
-        </div>`;
+      wakeLockSentinel = await navigator.wakeLock.request('screen');
+      wakeLockSentinel.addEventListener('release', () => {
+        wakeLockSentinel = null;
+        updateWakeLockUI();
       });
+      updateWakeLockUI();
+      return true;
+    } catch (_) {
+      updateWakeLockUI();
+      return false;
     }
-    html += `</div>`;
   }
 
-  const detailEl = document.getElementById('calDetail');
-  detailEl.innerHTML = html;
-  detailEl.style.display = 'block';
-  applyTranslations(detailEl);
-}
-
-function toggleDone(dk) {
-  if (completed[dk]) {
-    delete completed[dk];
-    if (sbClient) sbClient.from('workouts_completed').delete().match({ profile_id: supabaseProfileId, day_key: dk }).then();
-  } else {
-    completed[dk] = true;
-    if (sbClient) sbClient.from('workouts_completed').insert({ profile_id: supabaseProfileId, day_key: dk }).then();
+  function updateWakeLockUI() {
+    const btn = el('wakeLockBtn');
+    const isOn = !!wakeLockSentinel;
+    if (btn) btn.classList.toggle('active', isOn);
   }
-  buildCalendar();
-  const parts = dk.split('-');
-  calSelect(dk, parseInt(parts[2]));
-  buildBadgesGrid();
-}
 
-function launchTimer(day) {
-  tActiveDay = day;
-  showView('timer');
-}
+  async function toggleWakeLock() {
+    if (wakeLockSentinel) {
+      wakeLockDesired = false;
+      try { await wakeLockSentinel.release(); } catch (_) {}
+      wakeLockSentinel = null;
+      updateWakeLockUI();
+      showToast(`${tr('Screen Awake')}: OFF`);
+    } else {
+      wakeLockDesired = true;
+      const ok = await requestWakeLock();
+      showToast(ok ? `${tr('Screen Awake')}: ON` : tr('Screen Wake Lock unavailable'));
+    }
+  }
 
-/* ── WORKOUTS & TIMER LOGIC ── */
-function buildTimerTabs() {
-  const currentWorkouts = getWorkouts();
-  const days = ['A', 'B', 'C', 'D'];
-  if (currentWorkouts['TRX']) days.push('TRX');
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && wakeLockDesired && !wakeLockSentinel) {
+      requestWakeLock();
+    }
+  });
 
-  document.getElementById('dayTabsT').innerHTML = days.map(d => {
-    if (!currentWorkouts[d]) return '';
-    return `<button class="dt${tActiveDay === d ? ' active' : ''}" onclick="selectTimerDay('${d}')">${T(currentWorkouts[d].label)}</button>`;
-  }).join('');
+  // =========================================================================
+  // VIEW 1: Home Dashboard
+  // =========================================================================
+  function buildWhoopRingCardHtml(color, pct, innerText, label, val, sub) {
+    const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+    const offset = MINI_CIRC - (MINI_CIRC * clamped / 100);
+    return `
+      <div class="ring-card">
+        <div class="mini-ring-wrap">
+          <svg class="mini-ring-svg" width="58" height="58" viewBox="0 0 58 58">
+            <circle class="mini-ring-bg" cx="29" cy="29" r="24"/>
+            <circle class="mini-ring-fg" cx="29" cy="29" r="24"
+              stroke="${escHtml(color)}"
+              stroke-dasharray="${MINI_CIRC.toFixed(2)}"
+              stroke-dashoffset="${offset.toFixed(2)}"/>
+          </svg>
+          <div class="mini-ring-pct">${escHtml(innerText)}</div>
+        </div>
+        <div>
+          <div class="rc-lbl">${escHtml(label)}</div>
+          <div class="rc-val">${escHtml(val)}</div>
+          <div class="rc-sub">${escHtml(sub)}</div>
+        </div>
+      </div>
+    `;
+  }
 
-  document.getElementById('hbBegTabs').innerHTML = ['HB_BEG_1', 'HB_BEG_2', 'HB_BEG_3'].map(k => {
-    return `<button class="dt${tActiveDay === k ? ' active' : ''}" onclick="selectTimerDay('${k}')">${currentWorkouts[k]?.label || k}</button>`;
-  }).join('');
+  function renderHomeView() {
+    const prof = BoxingStorage.getActiveProfile();
+    const today = new Date();
+    const todayDk = BoxingStorage.dateToDayKey(today);
+    const dur = prof.sessionDuration || 60;
+    const weekNum = BoxingWorkouts.getWeekOfProgram(today, prof.programStartDate);
+    const code = BoxingStorage.getAssignedWorkoutCode(prof, today);
+    const scaledDays = BoxingWorkouts.getScaledWorkoutsForDateRange(today, prof, dur);
 
-  document.getElementById('hbIntTabs').innerHTML = ['HB_INT_1', 'HB_INT_2', 'HB_INT_3'].map(k => {
-    return `<button class="dt${tActiveDay === k ? ' active' : ''}" onclick="selectTimerDay('${k}')">${currentWorkouts[k]?.label || k}</button>`;
-  }).join('');
+    // Choose today's workout or featured 4-station camp on Rest Day
+    const featuredHomeCampId = dur === 120 ? 'camp_home_120' : dur === 90 ? 'camp_home_90' : 'camp_home_60';
+    const isRest = code === 'R' || !scaledDays[code];
+    const heroWo = isRest
+      ? BoxingWorkouts.getWorkoutById(featuredHomeCampId, today, prof, dur)
+      : scaledDays[code];
+    const heroStats = BoxingWorkouts.calcWorkoutStats(heroWo);
+    const heroCover = BoxingWorkouts.getWorkoutCover(heroWo);
+    const isDoneToday = !!(prof.completed && prof.completed[todayDk]);
 
-  document.getElementById('hbAdvTabs').innerHTML = ['HB_ADV_1', 'HB_ADV_2', 'HB_ADV_3'].map(k => {
-    return `<button class="dt${tActiveDay === k ? ' active' : ''}" onclick="selectTimerDay('${k}')">${currentWorkouts[k]?.label || k}</button>`;
-  }).join('');
-}
+    const heroEl = el('todayCampHero');
+    if (heroEl) {
+      const eyebrowTxt = isRest
+        ? `${tr('Recovery Day')} · ${tr('Week')} ${weekNum}`
+        : `${tr("Today's Fight Camp")} · ${tr('Week')} ${weekNum} · ${tr(prof.fitnessLevel[0].toUpperCase() + prof.fitnessLevel.slice(1))}`;
+      const launchId = isRest ? featuredHomeCampId : `day:${todayDk}`;
+      const estKcal = BoxingStorage.estimateSessionKcal(heroStats.totalSecs, heroWo.category || 'camp');
 
-function selectTimerDay(day) {
-  stopTimer();
-  tActiveDay = day;
-  tActiveEx = -1;
-  tRound = 1;
-  buildTimerTabs();
-  renderExList();
-  loadEx(false);
-}
+      heroEl.innerHTML = `
+        <img class="hero-bg-img" src="${escHtml(heroCover)}" alt="${escHtml(tr(heroWo.label))}">
+        <div class="hero-scrim"></div>
+        <div class="hero-content">
+          <div class="hero-left">
+            <div class="hero-eyebrow">⚡ ${escHtml(eyebrowTxt)}</div>
+            <h2 class="hero-title">${escHtml(tr(heroWo.label))}</h2>
+            <div class="hero-sub">${escHtml(tr(heroWo.subtitle || heroWo.focus || ''))}</div>
+            <div class="hero-chips">
+              <span class="meta-chip accent">⏱ ${escHtml(fmtHumanDuration(heroStats.totalSecs))}</span>
+              <span class="meta-chip">🥊 ${heroStats.boxingRounds} ${escHtml(tr('Rnds'))}</span>
+              <span class="meta-chip">🔥 ~${estKcal} ${escHtml(tr('kcal'))}</span>
+              ${gearIconsHtml((heroWo.gearIds || BoxingWorkouts.inferGearIds(heroWo)).slice(0, 4))}
+            </div>
+          </div>
+          <div class="hero-right">
+            <div class="hero-cta-row">
+              <button type="button" class="stbtn" onclick="launchWorkoutById('${escHtml(launchId)}')">▶ ${escHtml(tr('Start Camp'))}</button>
+              <button type="button" class="mkbtn ${isDoneToday ? 'done' : ''}" onclick="toggleTodayCompleted('${escHtml(todayDk)}')">
+                ${isDoneToday ? `✓ ${escHtml(tr('Completed'))}` : `○ ${escHtml(tr('Mark Done'))}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
 
-function renderExList() {
-  const wo = getWorkouts()[tActiveDay];
-  if (!wo) return;
-  document.getElementById('exListT').innerHTML = `
-    <div class="ex-list-t">
-      ${wo.exercises.map((ex, i) => {
-        const info = EXERCISE_INFO[ex.name];
-        const ytLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(ex.name + ' boxing tutorial')}`;
-        const safeId = 'et_info_' + i;
-        const dur = ex.rounds > 1 ? `${ex.rounds}×${fmt(ex.secs)}` : fmt(ex.secs);
+    // WHOOP Telemetry Rings
+    const stats = BoxingStorage.getFighterStats(prof);
+    const rank = BoxingStorage.getFighterRank(stats);
+    const weekly = BoxingStorage.getWeeklyGoalProgress(prof);
+    const stripEl = el('whoopTelemetryStrip');
+    if (stripEl) {
+      const streakPct = Math.min(100, Math.round((stats.currentStreak / 7) * 100));
+      const punchPct = Math.min(100, Math.round((stats.totalPunches / 10000) * 100));
+      stripEl.innerHTML = [
+        buildWhoopRingCardHtml(
+          '#C8FF00',
+          weekly.pct,
+          `${weekly.doneThisWeek}/${weekly.target}`,
+          tr('Weekly Goal'),
+          `${weekly.pct}%`,
+          `${weekly.doneThisWeek} ${tr('of')} ${weekly.target} ${tr('Sessions')}`
+        ),
+        buildWhoopRingCardHtml(
+          '#3B82F6',
+          rank.pct,
+          `${rank.pct}%`,
+          tr('Fighter Rank'),
+          tr(rank.rank),
+          `${rank.xp.toLocaleString()} XP`
+        ),
+        buildWhoopRingCardHtml(
+          '#FFB020',
+          streakPct,
+          `${stats.currentStreak}`,
+          tr('Streak'),
+          `${stats.currentStreak}d`,
+          `${tr('Best')}: ${stats.bestStreak}d`
+        ),
+        buildWhoopRingCardHtml(
+          '#00E5C0',
+          punchPct,
+          `${stats.totalSessions}`,
+          tr('Punches'),
+          stats.totalPunches.toLocaleString(),
+          `${stats.totalHours}h ${tr('Hours')}`
+        )
+      ].join('');
+    }
+
+    // 4 Horizontal Cover-Art Carousels
+    const carouselsEl = el('homeCarousels');
+    if (carouselsEl) {
+      const allScaledLib = BoxingWorkouts.LIBRARY_WORKOUTS.map(w => BoxingWorkouts.scaleWorkoutToDuration(w, dur));
+      const fullCamps = allScaledLib.filter(w => w.category === 'full_camp');
+      const bagAndShadow = allScaledLib.filter(w => w.category === 'heavy_bag' || w.category === 'shadowboxing');
+      const machineCardio = allScaledLib.filter(w => w.category === 'gym_machine' || w.category === 'cardio_rope' || w.category === 'conditioning');
+      const trxCards = Object.values(BoxingWorkouts.TRX_ROUTINES).map(r => ({
+        id: `trx:${r.key}`,
+        category: 'trx',
+        level: r.key === 'pain-relief' ? 'beginner' : r.key === 'foundation' ? 'intermediate' : 'advanced',
+        label: r.title,
+        subtitle: r.desc,
+        pill: 'ptrx',
+        color: r.color || '#00D2B4',
+        gearIds: ['trx'],
+        exercises: r.exercises
+      }));
+
+      const sections = [
+        { title: tr('Featured 4-Station Camps'), cat: 'full_camp', items: fullCamps },
+        { title: tr('Heavy Bag & Shadowboxing'), cat: 'heavy_bag', items: bagAndShadow },
+        { title: tr('Multi-Gym, Treadmill & Rope'), cat: 'gym_machine', items: machineCardio },
+        { title: tr('TRX Core & Back Health'), cat: 'trx', items: trxCards }
+      ];
+
+      carouselsEl.innerHTML = sections.map(sec => `
+        <section>
+          <div class="carousel-head">
+            <h3 class="carousel-title">${escHtml(sec.title)}</h3>
+            <button type="button" class="browse-link-btn" onclick="openCategoryFromHome('${escHtml(sec.cat)}')">${escHtml(tr('Browse All'))} →</button>
+          </div>
+          <div class="carousel-track">
+            ${sec.items.map(w => buildWorkoutCoverCardHtml(w)).join('')}
+          </div>
+        </section>
+      `).join('');
+    }
+  }
+
+  function openCategoryFromHome(cat) {
+    activeWorkoutCategory = cat;
+    showView('workouts');
+  }
+
+  function toggleTodayCompleted(dk) {
+    BoxingStorage.toggleDayCompleted(dk);
+    renderHomeView();
+    if (curView === 'camp') renderCampView();
+    updateTopbarChrome();
+  }
+
+  // =========================================================================
+  // VIEW 2: Workouts Catalog & TRX Spine/Core Protocols
+  // =========================================================================
+  function toggleGearFilter() {
+    filterByMyGear = !filterByMyGear;
+    renderWorkoutsView();
+  }
+
+  function setWorkoutCategory(cat) {
+    activeWorkoutCategory = cat;
+    renderWorkoutsView();
+  }
+
+  function setWorkoutLevel(lvl) {
+    activeWorkoutLevel = lvl;
+    renderWorkoutsView();
+  }
+
+  function selectTrxPhase(phaseKey) {
+    activeTrxPhase = phaseKey;
+    renderTrxCatalogSection();
+  }
+
+  function renderWorkoutsView() {
+    const prof = BoxingStorage.getActiveProfile();
+    const dur = prof.sessionDuration || 60;
+    const myGear = new Set(prof.equipment || []);
+
+    const gfBtn = el('gearFilterBtn');
+    const gfVal = el('gearFilterVal');
+    if (gfBtn) gfBtn.classList.toggle('active', filterByMyGear);
+    if (gfVal) gfVal.textContent = filterByMyGear ? tr('My Home Gear Only') : tr('All Gear');
+
+    const cats = [
+      { id: 'all', label: tr('All') },
+      { id: 'full_camp', label: tr('4-Station Camps') },
+      { id: 'heavy_bag', label: tr('Heavy Bag') },
+      { id: 'shadowboxing', label: tr('Shadowboxing') },
+      { id: 'gym_machine', label: tr('Multi-Gym') },
+      { id: 'cardio_rope', label: tr('Treadmill & Rope') },
+      { id: 'conditioning', label: tr('Conditioning') },
+      { id: 'trx', label: 'TRX' },
+      { id: 'custom', label: tr('My Custom') }
+    ];
+    const catTabs = el('workoutCatTabs');
+    if (catTabs) {
+      catTabs.innerHTML = cats.map(c =>
+        `<button type="button" class="fpill ${activeWorkoutCategory === c.id ? 'active' : ''}" onclick="setWorkoutCategory('${c.id}')">${escHtml(c.label)}</button>`
+      ).join('');
+    }
+
+    const trxSec = el('trxCatalogSection');
+    const lvlTabs = el('workoutLevelTabs');
+    const grid = el('workoutBrowserGrid');
+
+    if (activeWorkoutCategory === 'trx') {
+      if (lvlTabs) lvlTabs.style.display = 'none';
+      if (grid) grid.style.display = 'none';
+      if (trxSec) trxSec.style.display = 'block';
+      renderTrxCatalogSection();
+      return;
+    }
+
+    if (trxSec) trxSec.style.display = 'none';
+    if (lvlTabs) lvlTabs.style.display = 'flex';
+    if (grid) grid.style.display = 'grid';
+
+    const lvls = [
+      { id: 'all', label: tr('All Levels') },
+      { id: 'beginner', label: tr('Beginner') },
+      { id: 'intermediate', label: tr('Intermediate') },
+      { id: 'advanced', label: tr('Advanced') }
+    ];
+    if (lvlTabs) {
+      lvlTabs.innerHTML = lvls.map(l =>
+        `<button type="button" class="fpill ${activeWorkoutLevel === l.id ? 'active' : ''}" onclick="setWorkoutLevel('${l.id}')">${escHtml(l.label)}</button>`
+      ).join('');
+    }
+
+    // Build filtered workout list
+    const scaledLib = BoxingWorkouts.LIBRARY_WORKOUTS.map(w => BoxingWorkouts.scaleWorkoutToDuration(w, dur));
+    const customs = (prof.customWorkouts || []).map(w => ({ ...w, category: 'custom', isCustom: true, gearIds: BoxingWorkouts.inferGearIds(w) }));
+    const combined = activeWorkoutCategory === 'custom' ? customs : [...scaledLib, ...customs];
+
+    const filtered = combined.filter(wo => {
+      if (activeWorkoutCategory !== 'all' && activeWorkoutCategory !== 'custom' && wo.category !== activeWorkoutCategory) return false;
+      if (activeWorkoutCategory === 'custom' && !wo.isCustom) return false;
+      if (activeWorkoutLevel !== 'all' && wo.level && wo.level !== activeWorkoutLevel) return false;
+      if (filterByMyGear) {
+        const req = wo.gearIds || BoxingWorkouts.inferGearIds(wo);
+        if (req.some(g => !myGear.has(g))) return false;
+      }
+      return true;
+    });
+
+    if (grid) {
+      if (!filtered.length) {
+        grid.innerHTML = `<div class="settings-block" style="grid-column:1/-1;text-align:center;color:var(--text-secondary)">${escHtml(tr('No workouts match the selected filters. Try enabling more home gear or changing level.'))}</div>`;
+      } else {
+        grid.innerHTML = filtered.map(wo => buildWorkoutCoverCardHtml(wo, { isCustom: !!wo.isCustom })).join('');
+      }
+    }
+  }
+
+  function renderTrxCatalogSection() {
+    const routines = BoxingWorkouts.TRX_ROUTINES;
+    const phaseKeys = Object.keys(routines);
+    if (!routines[activeTrxPhase]) activeTrxPhase = phaseKeys[0];
+    const r = routines[activeTrxPhase];
+
+    const tabs = el('trxPhaseTabs');
+    if (tabs) {
+      tabs.innerHTML = phaseKeys.map(k => {
+        const item = routines[k];
+        return `<button type="button" class="trx-ltab ${k === activeTrxPhase ? 'active' : ''}" onclick="selectTrxPhase('${escHtml(k)}')">${escHtml(tr(item.shortLabel || item.title))}</button>`;
+      }).join('');
+    }
+
+    const stats = BoxingWorkouts.calcWorkoutStats(r);
+    if (el('trxLevelTitle')) el('trxLevelTitle').textContent = tr(r.title);
+    if (el('trxLevelDesc')) el('trxLevelDesc').textContent = tr(r.desc || '');
+    if (el('trxLevelMeta')) {
+      el('trxLevelMeta').innerHTML = `
+        <span class="meta-chip accent">⏱ ${escHtml(fmtHumanDuration(stats.totalSecs))}</span>
+        <span class="meta-chip">🎗️ ${r.exercises.length} ${escHtml(tr('Exercises'))}</span>
+      `;
+    }
+
+    const listEl = el('trxExercisesList');
+    if (listEl) {
+      listEl.innerHTML = r.exercises.map((ex, i) => {
+        const pm = BoxingWorkouts.PHASE_META[ex.phase] || BoxingWorkouts.PHASE_META.core;
+        const rowId = `trx-info-${activeTrxPhase}-${i}`;
         return `
-          <div class="exrow-t${i === tActiveEx ? ' aex' : ''}" id="et${i}" onclick="jumpToEx(${i})">
-            <div class="exdot" style="background:${PHASE_META[ex.phase].color}"></div>
-            <div class="exname">${T(ex.name)}</div>
-            <div class="exdur2">${dur}</div>
-            ${info ? `<button class="info-btn" onclick="toggleInfo(event,'${safeId}')">ℹ</button>` : ''}
-            ${info ? `<div class="info-panel" id="${safeId}">${T(info)}<br><a href="${ytLink}" target="_blank" style="display:inline-block;margin-top:4px;color:#fff;font-weight:700;text-decoration:none;">&#9654; Tutorial</a></div>` : ''}
+          <div class="exrow">
+            <span class="ephase ${escHtml(pm.cls)}">${escHtml(tr(pm.label))}</span>
+            <div class="exname">
+              ${escHtml(tr(ex.name))}
+              <div class="ex-subline">${escHtml(tr(ex.detail || ''))} ${ex.sets ? `· <strong>${escHtml(ex.sets)}</strong>` : ''}</div>
+            </div>
+            <span class="edur">${escHtml(fmtTime(ex.secs))} × ${ex.rounds || 1}</span>
+            <button type="button" class="info-btn" onclick="toggleInfo('${escHtml(rowId)}')">ℹ</button>
+            <div class="info-panel" id="${escHtml(rowId)}">${buildExerciseInfoHtml(ex)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  function startTrxWorkout() {
+    launchWorkoutById(`trx:${activeTrxPhase}`);
+  }
+
+  function toggleInfo(domId) {
+    const node = el(domId);
+    if (!node) return;
+    node.style.display = node.style.display === 'block' ? 'none' : 'block';
+  }
+
+  // =========================================================================
+  // VIEW 3: Fight Arena (Timer, Combos, Reflex Mode, SVG HUD, Focus Mode)
+  // =========================================================================
+  function clearArenaTimers() {
+    if (tInt) {
+      clearInterval(tInt);
+      tInt = null;
+    }
+    if (comboScheduler) {
+      clearTimeout(comboScheduler);
+      comboScheduler = null;
+    }
+    comboChildTimers.forEach(id => clearTimeout(id));
+    comboChildTimers = [];
+  }
+
+  function resetArenaStrikeVisuals() {
+    document.querySelectorAll('#targetSvgMain .zone-hit, #targetSvgFocus .zone-hit').forEach(n => n.classList.remove('zone-hit'));
+    document.querySelectorAll('#targetSvgMain .def-hit, #targetSvgFocus .def-hit').forEach(n => n.classList.remove('def-hit'));
+    const readout = el('targetZoneReadout');
+    if (readout) readout.textContent = tr('Ready');
+  }
+
+  function highlightStrikeZone(punchKey) {
+    const prof = BoxingStorage.getActiveProfile();
+    const meta = BoxingData.getPunchMeta(punchKey);
+    if (!meta) return;
+
+    resetArenaStrikeVisuals();
+    const zone = BoxingData.getStanceTargetSide(meta.targetZone, prof.stance || 'orthodox');
+    const cls = zone.startsWith('def-') ? 'def-hit' : 'zone-hit';
+
+    const mainNode = el(`zone-${zone}`);
+    const focusNode = el(`fm-zone-${zone}`);
+    if (mainNode) mainNode.classList.add(cls);
+    if (focusNode) focusNode.classList.add(cls);
+
+    const readout = el('targetZoneReadout');
+    if (readout) {
+      readout.textContent = BoxingData.getPunchDisplayLabel(meta.key, prof.calloutStyle, prof.stance);
+    }
+  }
+
+  function computeRoundPunchGoal(secs) {
+    return Math.max(20, Math.round((secs / 180) * 100));
+  }
+
+  function launchWorkoutById(id) {
+    const prof = BoxingStorage.getActiveProfile();
+    let wo = null;
+    let optDayKey = null;
+
+    if (String(id).startsWith('day:')) {
+      optDayKey = String(id).slice(4);
+      const dt = BoxingStorage.parseDayKey(optDayKey) || new Date();
+      const scaled = BoxingWorkouts.getScaledWorkoutsForDateRange(dt, prof, prof.sessionDuration || 60);
+      const code = BoxingStorage.getAssignedWorkoutCode(prof, dt);
+      wo = scaled[code] || scaled.A;
+    } else {
+      wo = resolveWorkoutByAnyId(id, new Date(), prof);
+    }
+
+    if (!wo || !Array.isArray(wo.exercises) || !wo.exercises.length) {
+      showToast(tr('Workout not found'), 'err');
+      return;
+    }
+
+    loadWorkoutIntoArena(wo, optDayKey);
+    showView('arena');
+  }
+
+  function loadWorkoutIntoArena(wo, optDayKey) {
+    clearArenaTimers();
+    BoxingAudio.stopCurrentAudio();
+
+    tRunning = false;
+    tInRest = false;
+    tExIdx = 0;
+    tRound = 1;
+    sessionPunches = 0;
+    roundPunches = 0;
+    sessionElapsedSecs = 0;
+    activeBoxingElapsedSecs = 0;
+    lastSessionLogId = null;
+
+    tWorkout = {
+      ...wo,
+      title: wo.title || wo.label || 'Boxing Session',
+      dayKey: optDayKey || BoxingStorage.dateToDayKey(new Date())
+    };
+
+    const doneCard = el('sessionCompleteCard');
+    if (doneCard) doneCard.style.display = 'none';
+    const cornerEl = el('cornerRestOverlay');
+    if (cornerEl) cornerEl.style.display = 'none';
+
+    loadCurrentExerciseIntoClock(true);
+    renderArenaView();
+  }
+
+  function loadCurrentExerciseIntoClock(resetRound) {
+    if (!tWorkout || !tWorkout.exercises[tExIdx]) return;
+    const ex = tWorkout.exercises[tExIdx];
+    if (resetRound) {
+      tRound = 1;
+      tInRest = false;
+    }
+    tTotal = Math.max(5, Number(ex.secs) || 60);
+    tRem = tTotal;
+    roundDurationStartSecs = tTotal;
+    roundPunches = 0;
+    currentRoundGoal = computeRoundPunchGoal(tTotal);
+    currentComboCounted = false;
+    resetArenaStrikeVisuals();
+    if (el('comboName')) el('comboName').textContent = tr(ex.name);
+    if (el('comboCue')) el('comboCue').textContent = tr(ex.detail || '');
+    if (el('callout')) el('callout').textContent = '—';
+    if (el('comboChips')) el('comboChips').innerHTML = '';
+    if (el('fmComboName')) el('fmComboName').textContent = tr(ex.name);
+    if (el('fmCallout')) el('fmCallout').textContent = '—';
+    if (el('fmComboChips')) el('fmComboChips').innerHTML = '';
+  }
+
+  function renderArenaView() {
+    if (!tWorkout) {
+      // Load today's workout automatically so Arena is never dead
+      const prof = BoxingStorage.getActiveProfile();
+      const dur = prof.sessionDuration || 60;
+      const fallbackId = dur === 120 ? 'camp_home_120' : dur === 90 ? 'camp_home_90' : 'camp_home_60';
+      const defaultWo = resolveWorkoutByAnyId(fallbackId, new Date(), prof);
+      if (defaultWo) {
+        tWorkout = { ...defaultWo, title: defaultWo.label, dayKey: BoxingStorage.dateToDayKey(new Date()) };
+        loadCurrentExerciseIntoClock(true);
+      }
+    }
+
+    updateTopbarChrome();
+    renderArenaSegments();
+    renderArenaStage();
+    renderArenaExerciseList();
+    renderCoachDrawerControls();
+    renderPunchReference();
+    if (focusModeActive) syncFocusModeUI();
+  }
+
+  function renderArenaSegments() {
+    const segWrap = el('arenaSegments');
+    if (!tWorkout || !segWrap) return;
+
+    const exs = tWorkout.exercises || [];
+    const total = exs.length;
+    const pct = total > 0 ? Math.min(100, Math.round(((tExIdx + (tInRest ? 0.5 : 0)) / total) * 100)) : 0;
+    if (el('tcWorkoutTitle')) el('tcWorkoutTitle').textContent = tr(tWorkout.title || tWorkout.label || 'Boxing');
+    if (el('progPct')) el('progPct').textContent = `${pct}%`;
+
+    segWrap.innerHTML = exs.map((ex, i) => {
+      const pm = BoxingWorkouts.PHASE_META[ex.phase] || BoxingWorkouts.PHASE_META.boxing;
+      const cls = i < tExIdx ? 'done' : i === tExIdx ? 'active' : '';
+      return `<div class="seg-bar ${cls}" style="color:${escHtml(pm.color)};background:${i <= tExIdx ? escHtml(pm.color) : 'rgba(255,255,255,0.12)'}" title="${escHtml(tr(ex.name))}" onclick="jumpToEx(${i})"></div>`;
+    }).join('');
+  }
+
+  function renderArenaStage() {
+    if (!tWorkout || !tWorkout.exercises[tExIdx]) return;
+    const ex = tWorkout.exercises[tExIdx];
+    const pm = BoxingWorkouts.PHASE_META[ex.phase] || BoxingWorkouts.PHASE_META.boxing;
+    const isRestState = tInRest || ex.phase === 'rest';
+    const totalR = ex.rounds || 1;
+
+    const card = el('timerCard');
+    if (card) {
+      card.classList.toggle('state-running', tRunning && !isRestState);
+      card.classList.toggle('state-rest', isRestState);
+      card.classList.toggle('state-warning', tRunning && tRem <= 3 && tRem > 0);
+    }
+
+    if (el('arenaRoundBadge')) {
+      el('arenaRoundBadge').textContent = `${tr('Exercise')} ${tExIdx + 1}/${tWorkout.exercises.length}`;
+    }
+    if (el('tcName')) {
+      el('tcName').textContent = tInRest ? tr('Corner Rest') : tr(ex.name);
+    }
+    const badge = el('tcBadge');
+    if (badge) {
+      badge.className = `tc-badge ephase ${isRestState ? 'eph-rest' : pm.cls}`;
+      badge.textContent = isRestState ? tr('Rest') : tr(pm.label);
+    }
+
+    // Ring SVG progress
+    const ring = el('ringFg');
+    if (ring) {
+      const ratio = tTotal > 0 ? Math.max(0, Math.min(1, tRem / tTotal)) : 0;
+      ring.style.strokeDasharray = T_CIRC.toFixed(2);
+      ring.style.strokeDashoffset = (T_CIRC * (1 - ratio)).toFixed(2);
+      ring.style.stroke = isRestState ? '#94A3B8' : (tRunning && tRem <= 3 ? '#FFB020' : pm.color);
+    }
+
+    if (el('timeBig')) el('timeBig').textContent = fmtTime(tRem);
+    if (el('ringRoundSub')) {
+      el('ringRoundSub').textContent = isRestState ? tr('Recover') : `${tr('Round')} ${tRound}/${totalR}`;
+    }
+    if (el('rndInfo')) {
+      el('rndInfo').textContent = tr(ex.detail || '');
+    }
+
+    // Live Context-Aware Telemetry Bar
+    const isBoxingWork = ex.phase === 'boxing' && !isRestState;
+    const goalLbl = el('arenaGoalLbl');
+    const goalVal = el('arenaGoalVal');
+    let fillPct = 0;
+
+    if (isBoxingWork) {
+      if (goalLbl) goalLbl.textContent = tr('Round Punch Target');
+      if (goalVal) goalVal.innerHTML = `<strong id="roundPunchCount">${roundPunches}</strong> / <span id="roundPunchGoal">${currentRoundGoal}</span> 🥊`;
+      fillPct = Math.min(100, Math.round((roundPunches / Math.max(1, currentRoundGoal)) * 100));
+    } else {
+      const elapsedInBlock = Math.max(0, tTotal - tRem);
+      if (goalLbl) goalLbl.textContent = tr(isRestState ? 'Recovery Progress' : 'Station Progress');
+      if (goalVal) goalVal.innerHTML = `<strong id="roundPunchCount">${fmtTime(elapsedInBlock)}</strong> / <span id="roundPunchGoal">${fmtTime(tTotal)}</span>`;
+      fillPct = tTotal > 0 ? Math.min(100, Math.round((elapsedInBlock / tTotal) * 100)) : 0;
+    }
+    if (el('roundOutputFill')) el('roundOutputFill').style.width = `${fillPct}%`;
+
+    const activeMins = activeBoxingElapsedSecs > 5 ? activeBoxingElapsedSecs / 60 : sessionElapsedSecs / 60;
+    const ppm = activeMins > 0.08 ? Math.round(sessionPunches / activeMins) : 0;
+    const kcal = BoxingStorage.estimateSessionKcal(sessionElapsedSecs, tWorkout.category || 'boxing');
+    if (el('arenaPpmVal')) el('arenaPpmVal').textContent = String(ppm);
+    if (el('arenaKcalVal')) el('arenaKcalVal').textContent = String(kcal);
+
+    // Show/hide Boxing Target HUD & Combo Box & Strike Audio Strip cleanly
+    if (el('targetHudWrap')) el('targetHudWrap').style.display = isBoxingWork ? 'flex' : 'none';
+    if (el('comboBox')) el('comboBox').style.display = isBoxingWork ? 'block' : 'none';
+    if (el('punchReference')) el('punchReference').style.display = ex.phase === 'boxing' ? 'block' : 'none';
+
+    // Corner rest overlay
+    const cornerEl = el('cornerRestOverlay');
+    if (cornerEl) {
+      if (isRestState) {
+        cornerEl.style.display = 'block';
+        const nextTitle = getUpcomingStepLabel();
+        if (el('cornerRestNext')) el('cornerRestNext').textContent = `${tr('Next')}: ${nextTitle}`;
+        if (!currentCornerTip) {
+          currentCornerTip = BoxingData.CORNER_TIPS[Math.floor(Math.random() * BoxingData.CORNER_TIPS.length)];
+        }
+        if (el('cornerTipText')) el('cornerTipText').textContent = tr(currentCornerTip);
+        if (el('restRoundPunches')) {
+          el('restRoundPunches').textContent = `${roundPunches} ${tr('punches')} · ${sessionPunches} ${tr('total')}`;
+        }
+      } else {
+        cornerEl.style.display = 'none';
+        currentCornerTip = '';
+      }
+    }
+
+    // Primary Start / Pause button & Next-Up preview
+    const sb = el('startBtn');
+    if (sb) sb.textContent = tRunning ? `⏸ ${tr('Pause')}` : (tRem < tTotal ? `▶ ${tr('Resume')}` : `▶ ${tr('Start')}`);
+    if (el('nextUp')) el('nextUp').textContent = `${tr('Next')}: ${getUpcomingStepLabel()}`;
+  }
+
+  function getUpcomingStepLabel() {
+    if (!tWorkout || !tWorkout.exercises) return '—';
+    const ex = tWorkout.exercises[tExIdx];
+    if (!ex) return tr('Finish');
+    const rounds = ex.rounds || 1;
+    if (tInRest && tRound < rounds) {
+      return `${tr(ex.name)} (${tr('Round')} ${tRound + 1}/${rounds})`;
+    }
+    const nxt = tWorkout.exercises[tExIdx + 1];
+    return nxt ? tr(nxt.name) : tr('Session Complete');
+  }
+
+  function renderArenaExerciseList() {
+    const list = el('exListT');
+    if (!list || !tWorkout) return;
+
+    list.innerHTML = (tWorkout.exercises || []).map((ex, i) => {
+      const pm = BoxingWorkouts.PHASE_META[ex.phase] || BoxingWorkouts.PHASE_META.boxing;
+      const isCur = i === tExIdx;
+      const infoId = `arena-ex-info-${i}`;
+      const infoHtml = buildExerciseInfoHtml(ex);
+      const hasInfo = !!infoHtml;
+      return `
+        <div class="exrow-t ${isCur ? 'aex' : ''}" onclick="jumpToEx(${i})">
+          <span class="exdot" style="background:${escHtml(pm.color)}"></span>
+          <div class="exname">
+            ${escHtml(tr(ex.name))}
+            <div class="ex-subline">${escHtml(tr(ex.detail || ''))}</div>
+          </div>
+          <span class="exdur2">${escHtml(fmtTime(ex.secs))} × ${ex.rounds || 1}</span>
+          ${hasInfo ? `<button type="button" class="info-btn" onclick="event.stopPropagation(); toggleInfo('${infoId}')">ℹ</button>` : ''}
+          ${hasInfo ? `<div class="info-panel" id="${infoId}">${infoHtml}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderCoachDrawerControls() {
+    const prof = BoxingStorage.getActiveProfile();
+    const drawer = el('coachDrawer');
+    if (drawer) drawer.style.display = coachDrawerOpen ? 'block' : 'none';
+
+    if (el('speedSlider')) el('speedSlider').value = String(prof.comboSpeed || 1.0);
+    if (el('speedVal')) el('speedVal').textContent = `${Number(prof.comboSpeed || 1.0).toFixed(1)}×`;
+
+    const isRand = prof.restMode === 'random';
+    if (el('restFixedBtn')) el('restFixedBtn').classList.toggle('active', !isRand);
+    if (el('restRandomBtn')) el('restRandomBtn').classList.toggle('active', isRand);
+    if (el('restFixedControls')) el('restFixedControls').style.display = isRand ? 'none' : 'block';
+    if (el('restRandomControls')) el('restRandomControls').style.display = isRand ? 'block' : 'none';
+
+    if (el('pauseSlider')) el('pauseSlider').value = String(prof.comboPauseMs || 2200);
+    if (el('pauseVal')) el('pauseVal').textContent = `${((prof.comboPauseMs || 2200) / 1000).toFixed(1)}s`;
+    if (el('restMinSlider')) el('restMinSlider').value = String(prof.restMinMs || 1500);
+    if (el('restMinVal')) el('restMinVal').textContent = `${((prof.restMinMs || 1500) / 1000).toFixed(1)}s`;
+    if (el('restMaxSlider')) el('restMaxSlider').value = String(prof.restMaxMs || 4500);
+    if (el('restMaxVal')) el('restMaxVal').textContent = `${((prof.restMaxMs || 4500) / 1000).toFixed(1)}s`;
+  }
+
+  function renderPunchReference() {
+    const grid = el('punchReferenceGrid');
+    if (!grid) return;
+    const prof = BoxingStorage.getActiveProfile();
+    grid.innerHTML = Object.values(BoxingData.PUNCH_DATA).map(p => {
+      const txt = BoxingData.getPunchDisplayLabel(p.key, prof.calloutStyle, prof.stance);
+      return `<button type="button" class="pchip ${escHtml(p.chip)}" onclick="previewPunchAudio('${escHtml(p.key)}')">${escHtml(p.num)} · ${escHtml(txt)}</button>`;
+    }).join('');
+  }
+
+  function previewPunchAudio(key) {
+    const prof = BoxingStorage.getActiveProfile();
+    BoxingAudio.ensureAudio();
+    highlightStrikeZone(key);
+    BoxingAudio.playPunch(key, { stance: prof.stance, calloutStyle: prof.calloutStyle });
+  }
+
+  // --- Timer Engine ---
+  function toggleTimer() {
+    if (!tWorkout) return;
+    if (tRunning) {
+      pauseArenaTimer();
+      return;
+    }
+    startArenaTimer();
+  }
+
+  function pauseArenaTimer() {
+    tRunning = false;
+    clearArenaTimers();
+    BoxingAudio.stopCurrentAudio();
+    renderArenaStage();
+    if (focusModeActive) syncFocusModeUI();
+  }
+
+  function startArenaTimer() {
+    if (!tWorkout || !tWorkout.exercises[tExIdx]) return;
+    BoxingAudio.ensureAudio();
+    const doneCard = el('sessionCompleteCard');
+    if (doneCard) doneCard.style.display = 'none';
+
+    tRunning = true;
+    const ex = tWorkout.exercises[tExIdx];
+
+    if (tRem === tTotal && !tInRest) {
+      BoxingAudio.playGo();
+      BoxingAudio.triggerHaptic([35, 30, 35]);
+      BoxingAudio.playExerciseSound(ex.name);
+    }
+
+    clearArenaTimers();
+    tInt = setInterval(tickArenaSecond, 1000);
+
+    if (ex.phase === 'boxing' && !tInRest) {
+      scheduleNextCombo(600);
+    }
+
+    renderArenaStage();
+    if (focusModeActive) syncFocusModeUI();
+  }
+
+  function tickArenaSecond() {
+    if (!tRunning || !tWorkout || !tWorkout.exercises[tExIdx]) return;
+    const ex = tWorkout.exercises[tExIdx];
+
+    if (ex.phase !== 'rest' && !tInRest) {
+      sessionElapsedSecs += 1;
+      if (ex.phase === 'boxing') activeBoxingElapsedSecs += 1;
+    }
+
+    if (tRem > 1) {
+      tRem -= 1;
+      if (tRem <= 3) {
+        BoxingAudio.playTimerSound(String(tRem));
+        BoxingAudio.triggerHaptic(20);
+      } else if (!tInRest && ex.phase === 'boxing' && tRem === 10 && tTotal >= 45) {
+        BoxingAudio.playClapper();
+      }
+      renderArenaStage();
+      if (focusModeActive) syncFocusModeUI();
+      return;
+    }
+
+    // tRem reached 0
+    tRem = 0;
+    advanceAfterInterval();
+  }
+
+  function advanceAfterInterval() {
+    const prof = BoxingStorage.getActiveProfile();
+    const autoAdv = prof.autoAdvance !== false;
+    const ex = tWorkout.exercises[tExIdx];
+    const totalRounds = ex.rounds || 1;
+    const restBetween = (ex.phase === 'boxing' && Number(ex.restBetween) > 0 && Number(prof.defaultRestSecs) > 0)
+      ? Number(prof.defaultRestSecs)
+      : (Number(ex.restBetween) || 0);
+
+    clearArenaTimers();
+
+    if (!tInRest && tRound < totalRounds && restBetween > 0) {
+      // Transition into inter-round Corner Rest
+      tInRest = true;
+      tTotal = restBetween;
+      tRem = restBetween;
+      currentCornerTip = BoxingData.CORNER_TIPS[Math.floor(Math.random() * BoxingData.CORNER_TIPS.length)];
+      BoxingAudio.playBell(1);
+      BoxingAudio.triggerHaptic([60, 40, 60]);
+      resetArenaStrikeVisuals();
+      tInt = setInterval(tickArenaSecond, 1000);
+      renderArenaSegments();
+      renderArenaStage();
+      if (focusModeActive) syncFocusModeUI();
+      return;
+    }
+
+    if (tInRest || (!tInRest && tRound < totalRounds)) {
+      // Next round of current exercise
+      tInRest = false;
+      tRound += 1;
+      loadCurrentExerciseIntoClock(false);
+      BoxingAudio.playGo();
+      BoxingAudio.triggerHaptic([40, 30, 40]);
+      if (autoAdv) {
+        tInt = setInterval(tickArenaSecond, 1000);
+        if (ex.phase === 'boxing') scheduleNextCombo(600);
+      } else {
+        tRunning = false;
+      }
+      renderArenaSegments();
+      renderArenaStage();
+      if (focusModeActive) syncFocusModeUI();
+      return;
+    }
+
+    // Finished all rounds of current exercise -> Move to next exercise
+    if (tExIdx < tWorkout.exercises.length - 1) {
+      tExIdx += 1;
+      loadCurrentExerciseIntoClock(true);
+      BoxingAudio.playBell(1);
+      BoxingAudio.triggerHaptic([50, 40, 50]);
+      const nxtEx = tWorkout.exercises[tExIdx];
+      if (autoAdv) {
+        tInt = setInterval(tickArenaSecond, 1000);
+        BoxingAudio.playExerciseSound(nxtEx.name);
+        if (nxtEx.phase === 'boxing') scheduleNextCombo(650);
+      } else {
+        tRunning = false;
+      }
+      renderArenaSegments();
+      renderArenaStage();
+      renderArenaExerciseList();
+      if (focusModeActive) syncFocusModeUI();
+      return;
+    }
+
+    // Finished entire workout!
+    completeArenaWorkout();
+  }
+
+  function skipCornerRest() {
+    if (!tWorkout || !tWorkout.exercises[tExIdx]) return;
+    const ex = tWorkout.exercises[tExIdx];
+    if (tInRest) {
+      advanceAfterInterval();
+    } else if (ex.phase === 'rest') {
+      nextEx();
+    }
+  }
+
+  function completeArenaWorkout() {
+    tRunning = false;
+    clearArenaTimers();
+    BoxingAudio.playVictory();
+    BoxingAudio.playBell(3);
+    BoxingAudio.triggerHaptic([80, 60, 80, 60, 120]);
+    if (focusModeActive) exitFocusMode();
+
+    const stats = BoxingWorkouts.calcWorkoutStats(tWorkout);
+    const loggedSecs = sessionElapsedSecs > 30 ? sessionElapsedSecs : stats.totalSecs;
+    const countedRounds = stats.boxingRounds || stats.totalWorkRounds || 1;
+    const log = BoxingStorage.logWorkoutCompletion({
+      dateKey: tWorkout.dayKey || BoxingStorage.dateToDayKey(new Date()),
+      workoutId: tWorkout.id || 'custom',
+      label: tWorkout.title || tWorkout.label || 'Boxing Session',
+      category: tWorkout.category || 'camp',
+      durationSecs: loggedSecs,
+      rounds: countedRounds,
+      punches: sessionPunches,
+      rpe: 'solid'
+    });
+    lastSessionLogId = log.id;
+    selectedRpe = 'solid';
+
+    const kcal = BoxingStorage.estimateSessionKcal(loggedSecs, tWorkout.category || 'camp');
+    const metricsEl = el('sessionDoneMetrics');
+    if (metricsEl) {
+      metricsEl.innerHTML = `
+        <span class="meta-chip accent">⏱ ${escHtml(fmtHumanDuration(loggedSecs))}</span>
+        <span class="meta-chip">🥊 ${sessionPunches.toLocaleString()} ${escHtml(tr('Punches'))}</span>
+        <span class="meta-chip">🔥 ~${kcal} ${escHtml(tr('kcal'))}</span>
+      `;
+    }
+    const card = el('sessionCompleteCard');
+    if (card) card.style.display = 'block';
+
+    document.querySelectorAll('#rpePills .rpe-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.rpe === 'solid');
+    });
+
+    updateTopbarChrome();
+    renderArenaStage();
+    showToast(`${tr('Session complete!')} +${countedRounds * 40 + 100} XP`);
+  }
+
+  function selectSessionRpe(rpe) {
+    selectedRpe = rpe;
+    document.querySelectorAll('#rpePills .rpe-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.rpe === rpe);
+    });
+    if (lastSessionLogId) {
+      BoxingStorage.updateLastLogRpe(lastSessionLogId, rpe);
+    }
+  }
+
+  function finishAndReturnCamp() {
+    const card = el('sessionCompleteCard');
+    if (card) card.style.display = 'none';
+    showView('camp');
+  }
+
+  function jumpToEx(idx) {
+    if (!tWorkout || !tWorkout.exercises[idx]) return;
+    const wasRunning = tRunning;
+    clearArenaTimers();
+    BoxingAudio.stopCurrentAudio();
+    tExIdx = idx;
+    loadCurrentExerciseIntoClock(true);
+    renderArenaSegments();
+    renderArenaStage();
+    renderArenaExerciseList();
+    if (wasRunning) startArenaTimer();
+    else if (focusModeActive) syncFocusModeUI();
+  }
+
+  function prevEx() {
+    if (!tWorkout) return;
+    jumpToEx(Math.max(0, tExIdx - 1));
+  }
+
+  function nextEx() {
+    if (!tWorkout) return;
+    if (tExIdx < tWorkout.exercises.length - 1) {
+      jumpToEx(tExIdx + 1);
+    } else {
+      completeArenaWorkout();
+    }
+  }
+
+  function resetCurrentExercise() {
+    pauseArenaTimer();
+    loadCurrentExerciseIntoClock(true);
+    renderArenaSegments();
+    renderArenaStage();
+    if (focusModeActive) syncFocusModeUI();
+    showToast(tr('Round reset'));
+  }
+
+  // --- Dynamic Combo & Reflex Engine ---
+  function generateReflexCombo(ex) {
+    const defenses = ['slip-l', 'slip-r', 'roll', 'pull', 'parry', 'pivot'];
+    const defKey = defenses[Math.floor(Math.random() * defenses.length)];
+    const counters = [
+      ['cross', 'lead-hook', 'cross'],
+      ['lead-hook', 'cross'],
+      ['rear-upper', 'lead-hook', 'cross'],
+      ['jab', 'cross', 'body-lead-hook'],
+      ['cross', 'rear-upper', 'lead-hook'],
+      ['body-lead-hook', 'lead-hook', 'cross']
+    ];
+    const allowed = Array.isArray(ex && ex.allowedPunches) ? new Set(ex.allowedPunches) : null;
+    let c = counters[Math.floor(Math.random() * counters.length)];
+    if (allowed) {
+      const valid = counters.filter(seq => seq.every(p => allowed.has(p)));
+      if (valid.length) c = valid[Math.floor(Math.random() * valid.length)];
+    }
+    const seq = [defKey, ...c];
+    return {
+      name: `REFLEX · ${seq.map(k => (BoxingData.getPunchMeta(k) || { num: k }).num).join(' – ')}`,
+      cue: tr('React immediately off defense — whip your counter back before resetting guard.'),
+      punches: seq
+    };
+  }
+
+  function scheduleNextCombo(initialDelayMs) {
+    if (!tRunning || !tWorkout || tInRest) return;
+    const ex = tWorkout.exercises[tExIdx];
+    if (!ex || ex.phase !== 'boxing') return;
+
+    const prof = BoxingStorage.getActiveProfile();
+    const waitMs = typeof initialDelayMs === 'number'
+      ? initialDelayMs
+      : (prof.restMode === 'random'
+        ? (prof.restMinMs || 1500) + Math.random() * Math.max(300, (prof.restMaxMs || 4500) - (prof.restMinMs || 1500))
+        : (prof.comboPauseMs || 2200));
+
+    const actualWait = reflexMode ? Math.max(550, Math.round(waitMs * 0.72)) : waitMs;
+
+    comboScheduler = setTimeout(() => {
+      if (!tRunning || tInRest) return;
+      const curEx = tWorkout && tWorkout.exercises[tExIdx];
+      if (!curEx || curEx.phase !== 'boxing') return;
+
+      const combo = reflexMode
+        ? generateReflexCombo(curEx)
+        : BoxingCombos.generateNextCombo(curEx, {
+          level: prof.fitnessLevel,
+          style: prof.preferredStyle,
+          customCombos: prof.customCombos
+        });
+
+      fireComboSequence(combo);
+    }, actualWait);
+  }
+
+  function fireComboSequence(combo) {
+    if (!combo || !Array.isArray(combo.punches) || !combo.punches.length) return;
+    const prof = BoxingStorage.getActiveProfile();
+    const speed = Math.max(0.4, Number(prof.comboSpeed) || 1.0);
+    const stepMs = Math.round(560 / speed);
+
+    const notation = BoxingCombos.formatComboNotation(combo.punches, prof.calloutStyle, prof.stance);
+    if (el('comboName')) el('comboName').textContent = tr(combo.name || notation);
+    if (el('comboCue')) el('comboCue').textContent = tr(combo.cue || '');
+    if (el('callout')) el('callout').textContent = notation;
+    if (el('fmComboName')) el('fmComboName').textContent = tr(combo.name || notation);
+    if (el('fmCallout')) el('fmCallout').textContent = notation;
+
+    const chipsHtml = combo.punches.map((pKey, idx) => {
+      const meta = BoxingData.getPunchMeta(pKey) || { chip: 'chip-jab', num: pKey, label: pKey };
+      const label = prof.calloutStyle === 'numbers' ? meta.num : tr(meta.label);
+      return `<span class="pchip ${escHtml(meta.chip)}" data-cidx="${idx}">${escHtml(label)}</span>`;
+    }).join('');
+    if (el('comboChips')) el('comboChips').innerHTML = chipsHtml;
+    if (el('fmComboChips')) el('fmComboChips').innerHTML = chipsHtml;
+
+    combo.punches.forEach((pKey, idx) => {
+      const tid = setTimeout(() => {
+        if (!tRunning) return;
+        const meta = BoxingData.getPunchMeta(pKey);
+        if (meta && meta.isPunch) {
+          roundPunches += 1;
+          sessionPunches += 1;
+        }
+        highlightStrikeZone(pKey);
+        BoxingAudio.playPunch(pKey, { stance: prof.stance, calloutStyle: prof.calloutStyle });
+
+        document.querySelectorAll('#comboChips .pchip, #fmComboChips .pchip').forEach(chip => {
+          chip.classList.toggle('lit', Number(chip.dataset.cidx) === idx);
+        });
+        renderArenaStage();
+        if (focusModeActive) syncFocusModeUI();
+      }, idx * stepMs);
+      comboChildTimers.push(tid);
+    });
+
+    const doneTid = setTimeout(() => {
+      if (tRunning && !tInRest) {
+        scheduleNextCombo();
+      }
+    }, combo.punches.length * stepMs + 250);
+    comboChildTimers.push(doneTid);
+  }
+
+  function toggleReflexMode() {
+    reflexMode = !reflexMode;
+    updateTopbarChrome();
+    showToast(`${tr('Reflex Mode')}: ${reflexMode ? 'ON' : 'OFF'}`);
+  }
+
+  function toggleCoachDrawer() {
+    coachDrawerOpen = !coachDrawerOpen;
+    const drawer = el('coachDrawer');
+    if (drawer) drawer.style.display = coachDrawerOpen ? 'block' : 'none';
+    const btn = el('coachDrawerToggle');
+    if (btn) btn.classList.toggle('active', coachDrawerOpen);
+  }
+
+  function setAudioMode(mode) {
+    BoxingStorage.updateActiveProfile({ audioMode: mode });
+    updateTopbarChrome();
+    BoxingAudio.ensureAudio();
+    showToast(`${tr('Audio Mode')}: ${mode.toUpperCase()}`);
+  }
+
+  function toggleCalloutStyle() {
+    const prof = BoxingStorage.getActiveProfile();
+    const next = prof.calloutStyle === 'numbers' ? 'names' : 'numbers';
+    BoxingStorage.updateActiveProfile({ calloutStyle: next });
+    updateTopbarChrome();
+    renderPunchReference();
+  }
+
+  function toggleAutoAdvance() {
+    const prof = BoxingStorage.getActiveProfile();
+    BoxingStorage.updateActiveProfile({ autoAdvance: prof.autoAdvance === false });
+    updateTopbarChrome();
+  }
+
+  function updateSpeed(val) {
+    const v = Math.max(0.5, Math.min(2.0, Number(val) || 1.0));
+    BoxingStorage.updateActiveProfile({ comboSpeed: v });
+    if (el('speedVal')) el('speedVal').textContent = `${v.toFixed(1)}×`;
+  }
+
+  function toggleRestMode() {
+    const prof = BoxingStorage.getActiveProfile();
+    const next = prof.restMode === 'random' ? 'fixed' : 'random';
+    BoxingStorage.updateActiveProfile({ restMode: next });
+    renderCoachDrawerControls();
+  }
+
+  function updatePause(val) {
+    const ms = Math.max(400, Number(val) || 2200);
+    BoxingStorage.updateActiveProfile({ comboPauseMs: ms });
+    if (el('pauseVal')) el('pauseVal').textContent = `${(ms / 1000).toFixed(1)}s`;
+  }
+
+  function updateRestMin(val) {
+    const prof = BoxingStorage.getActiveProfile();
+    const minMs = Math.max(500, Number(val) || 1500);
+    const maxMs = Math.max(minMs + 300, prof.restMaxMs || 4500);
+    BoxingStorage.updateActiveProfile({ restMinMs: minMs, restMaxMs: maxMs });
+    if (el('restMinVal')) el('restMinVal').textContent = `${(minMs / 1000).toFixed(1)}s`;
+    if (el('restMaxSlider')) el('restMaxSlider').value = String(maxMs);
+    if (el('restMaxVal')) el('restMaxVal').textContent = `${(maxMs / 1000).toFixed(1)}s`;
+  }
+
+  function updateRestMax(val) {
+    const prof = BoxingStorage.getActiveProfile();
+    const maxMs = Math.max((prof.restMinMs || 1500) + 300, Number(val) || 4500);
+    BoxingStorage.updateActiveProfile({ restMaxMs: maxMs });
+    if (el('restMaxVal')) el('restMaxVal').textContent = `${(maxMs / 1000).toFixed(1)}s`;
+  }
+
+  // --- Focus Mode ---
+  function enterFocusMode() {
+    focusModeActive = true;
+    const ov = el('focusModeOverlay');
+    if (ov) ov.classList.add('open');
+    syncFocusModeUI();
+  }
+
+  function exitFocusMode() {
+    focusModeActive = false;
+    const ov = el('focusModeOverlay');
+    if (ov) ov.classList.remove('open');
+  }
+
+  function syncFocusModeUI() {
+    const ov = el('focusModeOverlay');
+    if (!ov || !tWorkout || !tWorkout.exercises[tExIdx]) return;
+    const ex = tWorkout.exercises[tExIdx];
+    const pm = BoxingWorkouts.PHASE_META[ex.phase] || BoxingWorkouts.PHASE_META.boxing;
+    const isRestState = tInRest || ex.phase === 'rest';
+
+    ov.classList.toggle('phase-boxing', ex.phase === 'boxing' && !isRestState);
+    ov.classList.toggle('phase-rest', isRestState);
+    ov.classList.toggle('phase-warning', tRunning && tRem <= 3 && tRem > 0);
+
+    if (el('fmPhase')) el('fmPhase').textContent = isRestState ? tr('Corner Rest') : tr(pm.label);
+    if (el('fmExName')) el('fmExName').textContent = isRestState ? `${tr('Next')}: ${getUpcomingStepLabel()}` : tr(ex.name);
+    if (el('fmRoundBadge')) el('fmRoundBadge').textContent = `${tr('Round')} ${tRound}/${ex.rounds || 1}`;
+    if (el('fmPunchBadge')) el('fmPunchBadge').textContent = `${roundPunches} / ${sessionPunches} 🥊`;
+    if (el('fmTimeDigits')) el('fmTimeDigits').textContent = fmtTime(tRem);
+
+    const isBoxingWork = ex.phase === 'boxing' && !isRestState;
+    if (el('fmTargetHudWrap')) el('fmTargetHudWrap').style.display = isBoxingWork ? 'block' : 'none';
+    if (el('fmRestBanner')) {
+      el('fmRestBanner').style.display = isRestState ? 'block' : 'none';
+      if (isRestState && el('fmRestTip')) el('fmRestTip').textContent = tr(currentCornerTip);
+    }
+    if (el('fmStartBtn')) {
+      el('fmStartBtn').textContent = tRunning ? `⏸ ${tr('Pause')}` : `▶ ${tr('Start')}`;
+    }
+  }
+
+  // =========================================================================
+  // VIEW 4: Fight Camp & Calendar
+  // =========================================================================
+  function shiftMonth(delta) {
+    curMonth += delta;
+    if (curMonth < 0) {
+      curMonth = 11;
+      curYear -= 1;
+    } else if (curMonth > 11) {
+      curMonth = 0;
+      curYear += 1;
+    }
+    renderCampView();
+  }
+
+  function selectCalendarDay(dk) {
+    selectedDayKey = dk;
+    renderCampView();
+  }
+
+  function toggleDayCompleteFromCal(dk) {
+    BoxingStorage.toggleDayCompleted(dk);
+    renderCampView();
+    updateTopbarChrome();
+  }
+
+  function renderCampView() {
+    const prof = BoxingStorage.getActiveProfile();
+    const stats = BoxingStorage.getFighterStats(prof);
+
+    if (el('sSess')) el('sSess').textContent = String(stats.totalSessions);
+    if (el('sHrs')) el('sHrs').textContent = `${stats.totalHours}h`;
+    if (el('sStr')) el('sStr').textContent = `${stats.currentStreak}d`;
+    if (el('sPunches')) el('sPunches').textContent = stats.totalPunches.toLocaleString();
+
+    const mTitle = el('calTitle');
+    if (mTitle) mTitle.textContent = `${tr(MONTH_NAMES[curMonth])} ${curYear}`;
+
+    const dhRow = el('dhRow');
+    if (dhRow) {
+      dhRow.innerHTML = DAY_SHORT_MON.map(d => `<div class="dh">${escHtml(tr(d))}</div>`).join('');
+    }
+
+    const firstDay = new Date(curYear, curMonth, 1);
+    const daysInMonth = new Date(curYear, curMonth + 1, 0).getDate();
+    const leadingEmpty = (firstDay.getDay() + 6) % 7; // Mon=0 .. Sun=6
+    const todayDk = BoxingStorage.dateToDayKey(new Date());
+    const scaledDays = BoxingWorkouts.getScaledWorkoutsForDateRange(firstDay, prof, prof.sessionDuration || 60);
+
+    const cells = [];
+    for (let i = 0; i < leadingEmpty; i++) {
+      cells.push('<div class="dc empty"></div>');
+    }
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dt = new Date(curYear, curMonth, d);
+      const dk = BoxingStorage.dayKey(curYear, curMonth, d);
+      const code = BoxingStorage.getAssignedWorkoutCode(prof, dt);
+      const isRest = code === 'R';
+      const isToday = dk === todayDk;
+      const isSel = dk === selectedDayKey;
+      const isDone = !!(prof.completed && prof.completed[dk]);
+      const pillCls = isRest ? 'pr' : `p${code.toLowerCase()}`;
+      const woObj = !isRest ? scaledDays[code] : null;
+      const pillLabel = isRest ? tr('Rest') : (woObj ? tr(woObj.label.replace(/^Day [ABCD]\s*[–-]\s*/, '')) : code);
+
+      cells.push(`
+        <div class="dc ${isToday ? 'today' : ''} ${isSel ? 'sel' : ''}" onclick="selectCalendarDay('${dk}')">
+          <div class="dn">${d}</div>
+          <span class="dpill ${pillCls}">${isRest ? tr('Rest') : `${code} · ${escHtml(pillLabel.slice(0, 12))}`}</span>
+          ${isDone ? '<div class="dcheck"><div class="dtick"></div></div>' : ''}
+        </div>
+      `);
+    }
+
+    const grid = el('calGrid');
+    if (grid) grid.innerHTML = cells.join('');
+
+    renderCalendarDetailPanel(prof);
+    renderCampTelemetrySummary(prof);
+    renderHeatmap(prof);
+  }
+
+  function renderCalendarDetailPanel(prof) {
+    const det = el('calDetail');
+    if (!det) return;
+    det.style.display = 'block';
+    det.className = 'detail-panel';
+    const dt = BoxingStorage.parseDayKey(selectedDayKey) || new Date();
+    const code = BoxingStorage.getAssignedWorkoutCode(prof, dt);
+    const isDone = !!(prof.completed && prof.completed[selectedDayKey]);
+    const dur = prof.sessionDuration || 60;
+    const scaled = BoxingWorkouts.getScaledWorkoutsForDateRange(dt, prof, dur);
+    const dateNice = dt.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+
+    if (code === 'R' || !scaled[code]) {
+      det.innerHTML = `
+        <div class="dp-hd">
+          <div>
+            <div class="dp-title">${escHtml(dateNice)} · ${escHtml(tr('Active Recovery & Mobility'))}</div>
+            <div class="dp-sub">${escHtml(tr('Light shadowboxing, hydration & TRX lumbar decompression optional.'))}</div>
+          </div>
+          <div class="dp-actions">
+            <button type="button" class="stbtn" onclick="launchWorkoutById('trx:pain-relief')">🎗️ ${escHtml(tr('TRX Mobility'))}</button>
+            <button type="button" class="mkbtn ${isDone ? 'done' : ''}" onclick="toggleDayCompleteFromCal('${escHtml(selectedDayKey)}')">
+              ${isDone ? `✓ ${escHtml(tr('Completed'))}` : `○ ${escHtml(tr('Mark Done'))}`}
+            </button>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    const wo = scaled[code];
+    const stats = BoxingWorkouts.calcWorkoutStats(wo);
+    det.innerHTML = `
+      <div class="dp-hd">
+        <div>
+          <div class="dp-title">${escHtml(dateNice)} — ${escHtml(tr(wo.label))}</div>
+          <div class="dp-sub">${escHtml(tr(wo.focus || wo.subtitle || ''))} · <strong>${escHtml(fmtHumanDuration(stats.totalSecs))}</strong> (${stats.boxingRounds} ${escHtml(tr('Rnds'))})</div>
+        </div>
+        <div class="dp-actions">
+          <button type="button" class="stbtn" onclick="launchWorkoutById('day:${escHtml(selectedDayKey)}')">▶ ${escHtml(tr('Launch in Timer'))}</button>
+          <button type="button" class="mkbtn ${isDone ? 'done' : ''}" onclick="toggleDayCompleteFromCal('${escHtml(selectedDayKey)}')">
+            ${isDone ? `✓ ${escHtml(tr('Completed'))}` : `○ ${escHtml(tr('Mark Done'))}`}
+          </button>
+        </div>
+      </div>
+      ${(wo.exercises || []).map((ex, i) => {
+        const pm = BoxingWorkouts.PHASE_META[ex.phase] || BoxingWorkouts.PHASE_META.boxing;
+        const infoId = `cal-ex-${i}`;
+        const infoHtml = buildExerciseInfoHtml(ex);
+        return `
+          <div class="exrow">
+            <span class="ephase ${escHtml(pm.cls)}">${escHtml(tr(pm.label))}</span>
+            <div class="exname">
+              ${escHtml(tr(ex.name))}
+              <div class="ex-subline">${escHtml(tr(ex.detail || ''))}</div>
+            </div>
+            <span class="edur">${escHtml(fmtTime(ex.secs))} × ${ex.rounds || 1}</span>
+            ${infoHtml ? `<button type="button" class="info-btn" onclick="toggleInfo('${infoId}')">ℹ</button>` : ''}
+            ${infoHtml ? `<div class="info-panel" id="${infoId}">${infoHtml}</div>` : ''}
           </div>
         `;
       }).join('')}
-    </div>
-  `;
-}
-
-async function loadEx(playAudio = true) {
-  const wo = getWorkouts()[tActiveDay];
-  if (!wo) return;
-
-  if (tActiveEx < 0 || tActiveEx >= wo.exercises.length) {
-    document.getElementById('tcName').textContent = T(wo.label);
-    document.getElementById('tcBadge').textContent = T(wo.label);
-    document.getElementById('tcBadge').style.background = wo.color;
-    document.getElementById('timeBig').textContent = '0:00';
-    document.getElementById('ringFg').style.strokeDashoffset = CIRC;
-    document.getElementById('rndInfo').textContent = '';
-    document.getElementById('comboBox').style.display = 'none';
-    document.getElementById('punchReference').style.display = 'none';
-    updateNextUp();
-    updateProg();
-    return;
+    `;
   }
 
-  const ex = wo.exercises[tActiveEx];
-  tRemaining = ex.secs;
-  document.getElementById('tcName').textContent = T(ex.name);
-  document.getElementById('tcBadge').textContent = T(PHASE_META[ex.phase].label);
-  document.getElementById('tcBadge').style.background = PHASE_META[ex.phase].color;
-  document.getElementById('timeBig').textContent = fmt(tRemaining);
-  document.getElementById('ringFg').style.stroke = PHASE_META[ex.phase].color;
-  document.getElementById('ringFg').style.strokeDashoffset = CIRC;
-  renderRndInfo(ex);
-  updateNextUp();
-  updateProg();
+  function renderCampTelemetrySummary(prof) {
+    const node = el('settingsTelemetry');
+    if (!node) return;
+    const logs = prof.workoutLogs || [];
+    const totalKcal = logs.reduce((sum, l) => sum + BoxingStorage.estimateSessionKcal(l.durationSecs, l.category), 0);
+    const totalRounds = logs.reduce((sum, l) => sum + (Number(l.rounds) || 0), 0);
+    const completedCount = Object.keys(prof.completed || {}).length;
+    const lastLog = logs.length ? logs[logs.length - 1] : null;
 
-  stopCurrentAudio();
-  if (playAudio) {
-    await playExerciseSound(ex.name);
+    node.innerHTML = `
+      <div class="sc"><div class="sc-l">${escHtml(tr('Days Checked'))}</div><div class="sc-v">${completedCount}</div></div>
+      <div class="sc"><div class="sc-l">${escHtml(tr('Total Rounds'))}</div><div class="sc-v">${totalRounds}</div></div>
+      <div class="sc"><div class="sc-l">${escHtml(tr('Est. Kcal'))}</div><div class="sc-v">${totalKcal.toLocaleString()}</div></div>
+      <div class="sc"><div class="sc-l">${escHtml(tr('Last Session'))}</div><div class="sc-v" style="font-size:14px">${lastLog ? escHtml(tr(lastLog.label).slice(0, 18)) : '—'}</div></div>
+    `;
   }
 
-  if (ex.phase === 'boxing') {
-    const allowed = getAllowedPunches(ex.name, ex.detail);
-    currentCombo = generateNextCombo(ex);
-    renderChips(currentCombo, -1);
-    document.getElementById('comboBox').style.display = 'block';
-    
-    document.getElementById('punchReferenceGrid').innerHTML = allowed.map(p => {
-      const pd = PUNCH_DATA[p];
-      return `<div class="pchip ${pd.chip}" style="opacity:0.85">${pd.label}</div>`;
-    }).join('');
-    document.getElementById('punchReference').style.display = 'block';
-  } else {
-    document.getElementById('comboBox').style.display = 'none';
-    document.getElementById('punchReference').style.display = 'none';
-  }
-
-  document.querySelectorAll('.exrow-t').forEach(r => r.classList.remove('aex'));
-  const row = document.getElementById('et' + tActiveEx);
-  if (row) {
-    row.classList.add('aex');
-    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }
-}
-
-function renderChips(combo, activeIdx) {
-  if (!combo) { document.getElementById('comboBox').style.display = 'none'; return; }
-  document.getElementById('comboName').textContent = combo.name;
-  document.getElementById('comboChips').innerHTML = combo.punches.map((p, i) => {
-    const pd = PUNCH_DATA[p];
-    return `<div class="pchip ${pd.chip}${i === activeIdx ? ' lit' : ''}">${pd.label}</div>`;
-  }).join('');
-  document.getElementById('callout').textContent = activeIdx >= 0 ? PUNCH_DATA[combo.punches[activeIdx]].word : '';
-}
-
-function fireCombo(combo) {
-  clearSeq();
-  let delay = 600 / comboSpeedMultiplier;
-  combo.punches.forEach((p, i) => {
-    setTimeout(() => {
-      if (!tRunning) return;
-      playPunch(p);
-      renderChips(combo, i);
-    }, delay);
-    
-    let punchDelay = PUNCH_DATA[p]?.delay || 500;
-    const nextP = combo.punches[i + 1];
-    if ((p === 'jab' || p === 'cross') && nextP && nextP !== 'jab' && nextP !== 'cross') {
-      punchDelay = 800;
-    }
-    delay += (punchDelay / comboSpeedMultiplier);
-  });
-
-  comboSeqId = setTimeout(() => {
-    if (!tRunning) return;
-    const ex = getWorkouts()[tActiveDay].exercises[tActiveEx];
-    currentCombo = generateNextCombo(ex);
-    renderChips(currentCombo, -1);
-
-    const thisRestMs = getRestDuration();
-    const callout = document.getElementById('callout');
-    let restSecs = Math.ceil(thisRestMs / 1000);
-    callout.textContent = '🥊 ' + T('Reposition') + '... ' + restSecs + 's';
-    callout.style.opacity = '0.7';
-
-    if (restCountdownInterval) clearInterval(restCountdownInterval);
-    restCountdownInterval = setInterval(() => {
-      restSecs--;
-      if (restSecs > 0) {
-        callout.textContent = '🥊 ' + T('Reposition') + '... ' + restSecs + 's';
-      } else {
-        clearInterval(restCountdownInterval);
-        restCountdownInterval = null;
-        callout.style.opacity = '1';
-      }
-    }, 1000);
-
-    setTimeout(() => {
-      if (restCountdownInterval) { clearInterval(restCountdownInterval); restCountdownInterval = null; }
-      callout.style.opacity = '1';
-      if (tRunning) fireCombo(currentCombo);
-    }, thisRestMs);
-  }, delay + 500);
-}
-
-function clearSeq() {
-  if (comboSeqId) { clearTimeout(comboSeqId); comboSeqId = null; }
-  if (restCountdownInterval) { clearInterval(restCountdownInterval); restCountdownInterval = null; }
-}
-
-function toggleTimer() {
-  ensureAudio();
-  if (isCountingDown) {
-    clearInterval(countdownInterval);
-    countdownInterval = null;
-    isCountingDown = false;
-    loadEx(false);
-    return;
-  }
-  if (tRunning) { stopTimer(); return; }
-  
-  if (tActiveEx === -1) {
-    tActiveEx = 0;
-    renderExList();
-    loadEx(false);
-  }
-
-  requestWakeLock();
-
-  startCountdown(() => {
-    beginExerciseTimer();
-  });
-}
-
-function beginExerciseTimer() {
-  tRunning = true;
-  document.getElementById('startBtn').textContent = T('Pause');
-  const ex = getWorkouts()[tActiveDay].exercises[tActiveEx];
-  document.getElementById('tcName').textContent = T(ex.name);
-  document.getElementById('timeBig').textContent = fmt(tRemaining);
-  document.getElementById('ringFg').style.stroke = PHASE_META[ex.phase].color;
-  document.getElementById('ringFg').style.strokeDashoffset = CIRC;
-  document.getElementById('rndInfo').textContent = ex.rounds > 1 ? `${T('Round')} ${tRound} ${T('of')} ${ex.rounds}` : (T(ex.detail) || '');
-  if (ex.phase === 'boxing') {
-    document.getElementById('comboBox').style.display = 'block';
-    fireCombo(currentCombo);
-  }
-  tInterval = setInterval(() => {
-    tRemaining--;
-    document.getElementById('timeBig').textContent = fmt(tRemaining);
-    const pct = tRemaining / ex.secs;
-    document.getElementById('ringFg').style.strokeDashoffset = CIRC * (1 - pct);
-    
-    // Time alerts
-    if (tRemaining === 300) playTimerSound('5 minutes');
-    if (tRemaining === 240) playTimerSound('4 minutes');
-    if (tRemaining === 180) playTimerSound('3 minutes');
-    if (tRemaining === 120) playTimerSound('2 minutes');
-    if (tRemaining === 60)  playTimerSound('1 minute');
-    if (tRemaining === 30)  playTimerSound('30 seconds');
-    
-    if ([3,2,1].includes(tRemaining)) playTimerSound(tRemaining);
-    else if (tRemaining <= 3 && tRemaining > 0) playTick();
-    if (tRemaining <= 0) {
-      playBell(); clearSeq(); renderChips(null, -1);
-      if (ex.rounds > 1 && tRound < ex.rounds) {
-        tRound++; tRemaining = ex.secs;
-        clearInterval(tInterval);
-        stopTimer();
-        document.getElementById('startBtn').textContent = T('Start');
-        
-        document.getElementById('timeBig').textContent = fmt(tRemaining);
-        document.getElementById('ringFg').style.strokeDashoffset = CIRC;
-        renderRndInfo(ex);
-        
-        if (ex.phase === 'boxing') {
-          currentCombo = generateNextCombo(ex);
-          renderChips(currentCombo, -1);
-        }
-        return;
-      } else {
-        tRound = 1;
-        const wo = getWorkouts()[tActiveDay];
-        if (tActiveEx < wo.exercises.length - 1) {
-          clearInterval(tInterval);
-          tActiveEx++; renderExList(); loadEx(true);
-          stopTimer();
-          return;
-        } else {
-          stopTimer();
-          document.getElementById('tcName').textContent = T('Session complete!');
-          
-          let targetDk = dayKey(today.getFullYear(), today.getMonth(), today.getDate());
-          if (selectedCalDay) {
-            const parts = selectedCalDay.split('-');
-            if (getWorkoutForDate(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2])) === tActiveDay) {
-              targetDk = selectedCalDay;
-            }
-          }
-          const isDone = !!completed[targetDk];
-          
-          document.getElementById('rndInfo').innerHTML = T('Great work, fighter!') + 
-            `<br><button id="sessionCompleteBtn" class="mkbtn${isDone ? ' done' : ''}" style="margin-top:20px; width:200px" onclick="markSessionComplete('${targetDk}')">${T(isDone ? 'Completed' : 'Mark done')}</button>`;
-            
-          document.getElementById('progFill').style.width = '100%';
-          document.getElementById('progPct').textContent = '100%';
-        }
-      }
-    }
-  }, 1000);
-}
-
-function markSessionComplete(dk) {
-  const isDone = completed[dk];
-  if (isDone) {
-    delete completed[dk];
-    if (sbClient) sbClient.from('workouts_completed').delete().match({ profile_id: supabaseProfileId, day_key: dk }).then();
-  } else {
-    completed[dk] = true;
-    if (sbClient) sbClient.from('workouts_completed').insert({ profile_id: supabaseProfileId, day_key: dk }).then();
-  }
-  buildCalendar();
-  buildBadgesGrid();
-  
-  const newDone = !!completed[dk];
-  const btn = document.getElementById('sessionCompleteBtn');
-  if (btn) {
-    btn.className = `mkbtn${newDone ? ' done' : ''}`;
-    btn.textContent = T(newDone ? 'Completed' : 'Mark done');
-  }
-}
-
-function stopTimer() {
-  tRunning = false;
-  clearInterval(tInterval);
-  clearSeq();
-  if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
-  isCountingDown = false;
-  if (!intRunning && !wakeLockManual) releaseWakeLock();
-  document.getElementById('startBtn').textContent = T('Start');
-}
-
-function jumpToEx(i) { stopTimer(); tActiveEx = i; tRound = 1; loadEx(true); }
-function prevEx() { 
-  stopTimer(); tRound = 1; 
-  if (tActiveEx > 0) { tActiveEx--; renderExList(); loadEx(true); } 
-  else if (tActiveEx === 0) { tActiveEx = -1; renderExList(); loadEx(true); }
-}
-function nextEx() { 
-  stopTimer(); tRound = 1; 
-  const wo = getWorkouts()[tActiveDay]; 
-  if (tActiveEx < wo.exercises.length - 1) { tActiveEx++; renderExList(); loadEx(true); } 
-}
-
-function updateNextUp() {
-  const wo = getWorkouts()[tActiveDay], el = document.getElementById('nextUp');
-  el.innerHTML = tActiveEx < wo.exercises.length - 1
-    ? `${T('Next:')} <span>${T(wo.exercises[tActiveEx + 1].name)}</span>`
-    : `<span>${T('Final exercise!')}</span>`;
-}
-
-function updateProg() {
-  const total = getWorkouts()[tActiveDay].exercises.length;
-  const pct = Math.round((Math.max(0, tActiveEx) / total) * 100);
-  document.getElementById('progFill').style.width = pct + '%';
-  document.getElementById('progPct').textContent = pct + '%';
-}
-
-/* ── SETTINGS ── */
-function buildSettings() {
-  const pSel = document.getElementById('programSelect');
-  if (pSel) pSel.value = localStorage.getItem('activeProgramId') || 'classic';
-  const pStr = document.getElementById('programStart');
-  if (pStr) pStr.value = programStartDate;
-
-  const grid = document.getElementById('dayAssignGrid');
-
-  grid.innerHTML = DNAMES.map((dn, i) => {
-    const cur = getAssignedType(i);
-    const opts = ['R', 'A', 'B', 'C', 'D'].map(v =>
-      `<option value="${v}"${cur === v ? ' selected' : ''}>${v === 'R' ? T('Rest') : T('Day ' + v)}</option>`
+  function renderHeatmap(prof) {
+    const grid = el('heatmapGrid');
+    if (!grid) return;
+    const cells = BoxingStorage.buildActivityHeatmap(prof, 12);
+    grid.innerHTML = cells.map(c =>
+      `<span class="hm-cell lv${c.level}" title="${escHtml(c.dateKey)}: ${c.count} ${escHtml(tr('Sessions'))}, ${c.punches} ${escHtml(tr('Punches'))}"></span>`
     ).join('');
-    return `<div class="day-col">
-      <div class="day-col-name">${T(dn)}</div>
-      <select class="day-sel" id="ds${i}" onchange="previewSchedule()">${opts}</select>
-    </div>`;
-  }).join('');
-  previewSchedule();
-}
-
-function getAssignedType(dow) {
-  const idx = workoutDays.indexOf(dow);
-  if (idx === -1) return 'R';
-  return dayOrder[idx] || 'R';
-}
-
-function previewSchedule() {
-  const picks = DNAMES.map((_, i) => (document.getElementById('ds' + i) || {}).value || 'R');
-  const styles = {
-    A: { bg: '#FCEBEB', c: '#791F1F' },
-    B: { bg: '#E6F1FB', c: '#0C447C' },
-    C: { bg: '#EAF3DE', c: '#27500A' },
-    D: { bg: '#FAEEDA', c: '#633806' },
-    R: { bg: 'var(--bg-secondary)', c: 'var(--text-tertiary)' },
-  };
-  document.getElementById('weekPreview').innerHTML = DNAMES.map((dn, i) => {
-    const v = picks[i]; const s = styles[v] || styles['R'];
-    return `<div class="wp-cell" style="background:${s.bg};color:${s.c}">${v === 'R' ? '–' : v}</div>`;
-  }).join('');
-}
-
-function autoAssignDays(val) {
-  const num = parseInt(val);
-  if (num === 2) {
-    workoutDays = [2, 4]; // Tue, Thu
-    dayOrder = ['A', 'B'];
-  } else if (num === 4) {
-    workoutDays = [1, 2, 4, 5]; // Mon, Tue, Thu, Fri
-    dayOrder = ['A', 'B', 'C', 'D'];
-  } else {
-    workoutDays = [1, 3, 5]; // Mon, Wed, Fri
-    dayOrder = ['A', 'B', 'C', 'D'];
-  }
-  buildSettings();
-}
-
-function saveSchedule() {
-  const picks = DNAMES.map((_, i) => ({ dow: i, val: (document.getElementById('ds' + i) || {}).value || 'R' }));
-  const training = picks.filter(p => p.val !== 'R');
-  if (training.length === 0) { alert(T('Pick at least 1 training day.')); return; }
-  
-  workoutDays = training.map(p => p.dow);
-  const assigned = training.map(p => p.val);
-  const order = [];
-  ['A', 'B', 'C', 'D'].forEach(t => { if (assigned.includes(t)) order.push(t); });
-  dayOrder = order.length > 0 ? order : ['A', 'B', 'C', 'D'];
-  
-  const progVal = document.getElementById('programSelect').value;
-  const dateVal = document.getElementById('programStart').value;
-  
-  localStorage.setItem('activeProgramId', progVal);
-  localStorage.setItem('programStartDate', dateVal);
-  programStartDate = dateVal;
-  
-  if (sbClient && supabaseProfileId) {
-    sbClient.from('profiles').update({ 
-      active_program_id: progVal, 
-      program_start_date: dateVal 
-    }).eq('id', supabaseProfileId).then();
   }
 
-  selectedCalDay = null;
-  document.getElementById('calDetail').style.display = 'none';
-  buildCalendar();
-  buildSettings();
-  showView('calendar');
-}
+  // =========================================================================
+  // VIEW 5: Technique Academy, Combo Playbook & Fighter Profile / Gear
+  // =========================================================================
+  function setProfileSubTab(tab) {
+    activeProfileSubTab = tab;
+    renderProfileView();
+  }
 
-/* ── INIT ── */
-buildCalendar();
-buildTimerTabs();
-renderExList();
-loadEx(false);
-buildTrxView();
-buildBadgesGrid();
+  function setTechCategory(cat) {
+    activeTechCategory = cat;
+    renderTechAcademy();
+  }
 
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW failed', err));
+  function setComboStyle(styleTag) {
+    activeComboStyle = styleTag;
+    renderComboPlaybook();
+  }
+
+  function renderProfileView() {
+    document.querySelectorAll('#profileSubTabs .subtab').forEach(btn => {
+      const target = btn.getAttribute('onclick') || '';
+      btn.classList.toggle('active', target.includes(`'${activeProfileSubTab}'`));
+    });
+
+    if (el('techAcademyPane')) el('techAcademyPane').style.display = activeProfileSubTab === 'academy' ? 'block' : 'none';
+    if (el('comboPlaybookPane')) el('comboPlaybookPane').style.display = activeProfileSubTab === 'combos' ? 'block' : 'none';
+    if (el('fighterProfilePane')) el('fighterProfilePane').style.display = activeProfileSubTab === 'gear' ? 'block' : 'none';
+
+    if (activeProfileSubTab === 'academy') renderTechAcademy();
+    else if (activeProfileSubTab === 'combos') renderComboPlaybook();
+    else renderFighterProfilePane();
+  }
+
+  function previewTechAudio(audioKey) {
+    const prof = BoxingStorage.getActiveProfile();
+    BoxingAudio.ensureAudio();
+    BoxingAudio.playPunch(audioKey, { stance: prof.stance, calloutStyle: 'names' });
+  }
+
+  function renderTechAcademy() {
+    const prof = BoxingStorage.getActiveProfile();
+    const stance = prof.stance || 'orthodox';
+    const cats = [
+      { id: 'all', label: tr('All') },
+      { id: 'punches', label: tr('Head Punches') },
+      { id: 'body', label: tr('Body Shots') },
+      { id: 'defense', label: tr('Defense') },
+      { id: 'footwork', label: tr('Footwork') },
+      { id: 'styles', label: tr('Styles') }
+    ];
+
+    const filterRow = el('techCatFilters');
+    if (filterRow) {
+      filterRow.innerHTML = cats.map(c =>
+        `<button type="button" class="fpill ${activeTechCategory === c.id ? 'active' : ''}" onclick="setTechCategory('${c.id}')">${escHtml(c.label)}</button>`
+      ).join('');
+    }
+
+    const items = BoxingData.TECHNIQUE_LIBRARY.filter(t => activeTechCategory === 'all' || t.category === activeTechCategory);
+    const grid = el('techniqueGrid');
+    if (grid) {
+      grid.innerHTML = items.map(t => `
+        <div class="tech-card">
+          <div class="tech-title">
+            <span>${escHtml(tr(t.name))}</span>
+            <span class="tech-num-badge">${escHtml(t.num)}</span>
+          </div>
+          <div class="tech-desc">${escHtml(tr(t.desc))}</div>
+          ${t.stanceNote ? `<div class="tech-stance-note"><strong>${escHtml(tr(stance === 'southpaw' ? 'Southpaw' : 'Orthodox'))}:</strong> ${escHtml(tr(t.stanceNote[stance] || t.stanceNote.orthodox || ''))}</div>` : ''}
+          <div class="tech-tips">
+            ${(t.tips || []).map(tip => `<div class="tech-tip">${escHtml(tr(tip))}</div>`).join('')}
+          </div>
+          ${t.mistake ? `<div class="tech-mistake">⚠ ${escHtml(tr('Avoid'))}: ${escHtml(tr(t.mistake))}</div>` : ''}
+          <div class="tech-foot">
+            ${t.audioKey ? `<button type="button" class="tech-btn" onclick="previewTechAudio('${escHtml(t.audioKey)}')">🔊 ${escHtml(tr('Preview Audio'))}</button>` : ''}
+            ${t.yt ? `<a class="tech-btn" href="${escHtml(t.yt)}" target="_blank" rel="noopener noreferrer">▶ ${escHtml(tr('Form Video'))}</a>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+  }
+
+  function previewComboById(id) {
+    const prof = BoxingStorage.getActiveProfile();
+    const all = [...BoxingCombos.COMBO_LIBRARY, ...(prof.customCombos || [])];
+    const combo = all.find(c => c.id === id);
+    if (!combo) return;
+    BoxingAudio.ensureAudio();
+    const speed = Math.max(0.5, Number(prof.comboSpeed) || 1.0);
+    const stepMs = Math.round(520 / speed);
+    combo.punches.forEach((p, idx) => {
+      setTimeout(() => BoxingAudio.playPunch(p, { stance: prof.stance, calloutStyle: prof.calloutStyle }), idx * stepMs);
+    });
+  }
+
+  function deleteCustomCombo(id) {
+    const prof = BoxingStorage.getActiveProfile();
+    const next = (prof.customCombos || []).filter(c => c.id !== id);
+    BoxingStorage.updateActiveProfile({ customCombos: next });
+    renderComboPlaybook();
+    showToast(tr('Combo deleted'));
+  }
+
+  function renderComboPlaybook() {
+    const prof = BoxingStorage.getActiveProfile();
+    const tags = [
+      { id: 'all', label: tr('All') },
+      { id: 'custom', label: tr('My Custom') },
+      { id: 'fundamentals', label: tr('Fundamentals') },
+      { id: 'peekaboo', label: 'Peek-a-Boo' },
+      { id: 'philly_shell', label: 'Philly Shell' },
+      { id: 'cuban', label: tr('Cuban') },
+      { id: 'body_snatcher', label: tr('Body Snatcher') },
+      { id: 'counter', label: tr('Counter') },
+      { id: 'power', label: tr('Power') },
+      { id: 'speed', label: tr('Speed') }
+    ];
+
+    const filterRow = el('comboStyleFilters');
+    if (filterRow) {
+      filterRow.innerHTML = tags.map(t =>
+        `<button type="button" class="fpill ${activeComboStyle === t.id ? 'active' : ''}" onclick="setComboStyle('${t.id}')">${escHtml(t.label)}</button>`
+      ).join('');
+    }
+
+    const customs = (prof.customCombos || []).map(c => ({ ...c, isCustom: true }));
+    const combined = [...customs, ...BoxingCombos.COMBO_LIBRARY];
+    const filtered = combined.filter(c => {
+      if (activeComboStyle === 'all') return true;
+      if (activeComboStyle === 'custom') return !!c.isCustom;
+      return Array.isArray(c.tags) && c.tags.includes(activeComboStyle);
+    });
+
+    const grid = el('comboPlaybookGrid');
+    if (grid) {
+      if (!filtered.length) {
+        grid.innerHTML = `<div class="settings-block" style="grid-column:1/-1;text-align:center;color:var(--text-secondary)">${escHtml(tr('No combinations in this filter yet. Click "+ Build Combo" to create your own!'))}</div>`;
+      } else {
+        grid.innerHTML = filtered.map(c => {
+          const notation = BoxingCombos.formatComboNotation(c.punches, prof.calloutStyle, prof.stance);
+          const chips = (c.punches || []).map(p => {
+            const meta = BoxingData.getPunchMeta(p) || { chip: 'chip-jab', num: p, label: p };
+            return `<span class="pchip ${escHtml(meta.chip)}">${escHtml(prof.calloutStyle === 'numbers' ? meta.num : tr(meta.label))}</span>`;
+          }).join('');
+          return `
+            <div class="combo-card">
+              <div class="tech-title">
+                <span>${escHtml(tr(c.name))}</span>
+                <span class="tech-num-badge">${escHtml(c.tier ? tr(c.tier.toUpperCase()) : 'CUSTOM')}</span>
+              </div>
+              <div class="combo-chips">${chips}</div>
+              <div class="tech-desc"><strong>${escHtml(notation)}</strong> — ${escHtml(tr(c.cue || ''))}</div>
+              <div class="tech-foot">
+                <button type="button" class="tech-btn" onclick="previewComboById('${escHtml(c.id)}')">🔊 ${escHtml(tr('Hear Combo'))}</button>
+                ${c.isCustom ? `<button type="button" class="tech-btn" onclick="deleteCustomCombo('${escHtml(c.id)}')">🗑 ${escHtml(tr('Delete'))}</button>` : ''}
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+  }
+
+  function renderFighterProfilePane() {
+    const prof = BoxingStorage.getActiveProfile();
+    const stats = BoxingStorage.getFighterStats(prof);
+    const rank = BoxingStorage.getFighterRank(stats);
+
+    const rankBanner = el('profileRankCard');
+    if (rankBanner) {
+      rankBanner.innerHTML = `
+        <div class="sr-top">
+          <div>
+            <div class="settings-title" style="margin:0">🥊 ${escHtml(prof.name)} — ${escHtml(tr(rank.rank))}</div>
+            <div class="settings-hint" style="margin:2px 0 0">${rank.xp.toLocaleString()} XP · ${stats.totalSessions} ${escHtml(tr('Sessions'))} · ${stats.totalPunches.toLocaleString()} ${escHtml(tr('Punches'))}</div>
+          </div>
+          <span class="tech-num-badge">${rank.pct}%</span>
+        </div>
+        <div class="sr-bar" style="height:7px;margin-top:10px"><div class="sr-fill" style="width:${rank.pct}%"></div></div>
+        <div class="settings-hint" style="margin:6px 0 0">${rank.nextRank ? `${escHtml(tr('Next Milestone'))}: ${escHtml(tr(rank.nextRank))} (${rank.nextXp.toLocaleString()} XP)` : escHtml(tr('Champion of the Studio'))}</div>
+      `;
+    }
+
+    // Badges
+    const badges = BoxingStorage.getBadgesProgress(prof);
+    const bGrid = el('badgesGrid');
+    if (bGrid) {
+      bGrid.innerHTML = badges.map(b => `
+        <div class="badge-card ${b.unlocked ? 'unlocked' : ''}">
+          <div class="badge-icon">${b.icon}</div>
+          <div class="badge-name">${escHtml(tr(b.name))}</div>
+          <div class="badge-desc">${escHtml(tr(b.desc))}</div>
+          <div class="badge-prog-bar"><div class="badge-prog-fill" style="width:${b.pct}%"></div></div>
+          <div class="badge-prog-lbl">${b.current}/${b.target}</div>
+        </div>
+      `).join('');
+    }
+
+    // Home Gym Equipment Toggles
+    const owned = new Set(prof.equipment || []);
+    const eqGrid = el('equipmentGrid');
+    if (eqGrid) {
+      eqGrid.innerHTML = BoxingWorkouts.EQUIPMENT_CATALOG.map(g => {
+        const has = owned.has(g.id);
+        return `
+          <button type="button" class="equip-toggle-card ${has ? 'owned' : ''}" onclick="toggleUserEquipment('${escHtml(g.id)}')">
+            <span>${g.icon} ${escHtml(tr(g.label))}</span>
+            <span>${has ? '✓' : '+'}</span>
+          </button>
+        `;
+      }).join('');
+    }
+
+    // Fighter Prefs active states
+    setActiveButtons([
+      ['pref-stance-orthodox', prof.stance !== 'southpaw'],
+      ['pref-stance-southpaw', prof.stance === 'southpaw'],
+      ['pref-callout-names', prof.calloutStyle !== 'numbers'],
+      ['pref-callout-numbers', prof.calloutStyle === 'numbers'],
+      ['pref-dur-60', (prof.sessionDuration || 60) === 60],
+      ['pref-dur-90', prof.sessionDuration === 90],
+      ['pref-dur-120', prof.sessionDuration === 120],
+      ['lvl-beginner', prof.fitnessLevel === 'beginner'],
+      ['lvl-intermediate', prof.fitnessLevel === 'intermediate'],
+      ['lvl-advanced', prof.fitnessLevel === 'advanced']
+    ]);
+
+    if (el('prefStyleSelect')) el('prefStyleSelect').value = prof.preferredStyle || 'all';
+    if (el('prefRestSelect')) el('prefRestSelect').value = String(prof.defaultRestSecs || 60);
+    if (el('programSelect')) el('programSelect').value = prof.activeProgramId || 'classic';
+    if (el('programStart')) el('programStart').value = prof.programStartDate || BoxingStorage.todayIso();
+    if (el('dpwSelect')) el('dpwSelect').value = String(Math.max(2, Math.min(5, (prof.workoutDays || []).length || 3)));
+
+    renderDayAssignGrid(prof);
+    renderWeekPreview(prof);
+  }
+
+  function renderDayAssignGrid(prof) {
+    const grid = el('dayAssignGrid');
+    if (!grid) return;
+    const assigned = {};
+    (prof.workoutDays || []).forEach((dow, idx) => {
+      assigned[dow] = (prof.dayOrder && prof.dayOrder[idx]) || 'A';
+    });
+
+    grid.innerHTML = DAY_ORDER_MON.map((dow, i) => {
+      const code = assigned[dow] || 'R';
+      return `
+        <div class="day-col">
+          <span class="day-col-name">${escHtml(tr(DAY_SHORT_MON[i]))}</span>
+          <select class="day-sel" data-dow="${dow}">
+            <option value="R" ${code === 'R' ? 'selected' : ''}>${escHtml(tr('Rest'))}</option>
+            <option value="A" ${code === 'A' ? 'selected' : ''}>A</option>
+            <option value="B" ${code === 'B' ? 'selected' : ''}>B</option>
+            <option value="C" ${code === 'C' ? 'selected' : ''}>C</option>
+            <option value="D" ${code === 'D' ? 'selected' : ''}>D</option>
+          </select>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderWeekPreview(prof) {
+    const prev = el('weekPreview');
+    if (!prev) return;
+    const refMonday = new Date(2026, 10, 16); // Known Monday
+    prev.innerHTML = DAY_ORDER_MON.map((dow, i) => {
+      const dt = new Date(refMonday.getFullYear(), refMonday.getMonth(), refMonday.getDate() + i);
+      const code = BoxingStorage.getAssignedWorkoutCode(prof, dt);
+      const cls = code === 'R' ? 'pr' : `p${code.toLowerCase()}`;
+      return `<div class="wp-cell ${cls}">${escHtml(tr(DAY_SHORT_MON[i]))}: ${code === 'R' ? tr('Rest') : code}</div>`;
+    }).join('');
+  }
+
+  function toggleUserEquipment(gearId) {
+    BoxingStorage.toggleEquipment(gearId);
+    renderFighterProfilePane();
+    showToast(tr('Equipment updated'));
+  }
+
+  function setFighterPref(key, value) {
+    BoxingStorage.updateActiveProfile({ [key]: value });
+    updateTopbarChrome();
+    renderFighterProfilePane();
+    showToast(tr('Preference saved'));
+  }
+
+  function setLevel(lvl) {
+    BoxingStorage.updateActiveProfile({ fitnessLevel: lvl });
+    updateTopbarChrome();
+    renderFighterProfilePane();
+    showToast(`${tr('Fitness Level')}: ${tr(lvl[0].toUpperCase() + lvl.slice(1))}`);
+  }
+
+  function autoAssignDays(countStr) {
+    const count = Math.max(2, Math.min(5, parseInt(countStr, 10) || 3));
+    const patterns = {
+      2: { dows: [1, 4], order: ['A', 'B'] },
+      3: { dows: [1, 3, 5], order: ['A', 'B', 'C'] },
+      4: { dows: [1, 2, 4, 5], order: ['A', 'B', 'C', 'D'] },
+      5: { dows: [1, 2, 3, 5, 6], order: ['A', 'B', 'C', 'D', 'A'] }
+    };
+    const p = patterns[count];
+    BoxingStorage.updateActiveProfile({ workoutDays: p.dows, dayOrder: p.order });
+    renderFighterProfilePane();
+    showToast(`${count} ${tr('Days / Week assigned')}`);
+  }
+
+  function saveSchedule() {
+    const workoutDays = [];
+    const dayOrder = [];
+    document.querySelectorAll('#dayAssignGrid .day-sel').forEach(sel => {
+      const dow = parseInt(sel.dataset.dow, 10);
+      if (sel.value !== 'R') {
+        workoutDays.push(dow);
+        dayOrder.push(sel.value);
+      }
+    });
+    const programId = (el('programSelect') && el('programSelect').value) || 'classic';
+    const startDate = (el('programStart') && el('programStart').value) || BoxingStorage.todayIso();
+
+    BoxingStorage.updateActiveProfile({
+      activeProgramId: programId,
+      programStartDate: startDate,
+      workoutDays,
+      dayOrder: dayOrder.length ? dayOrder : ['A']
+    });
+    renderFighterProfilePane();
+    showToast(tr('Training schedule saved'));
+  }
+
+  function exportDataJSON() {
+    const payload = BoxingStorage.buildExportPayload();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `boxing-coach-backup-${BoxingStorage.todayIso()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(tr('Backup exported'));
+  }
+
+  function importDataJSON(evt) {
+    const file = evt.target && evt.target.files && evt.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        BoxingStorage.importBackupObject(parsed);
+        updateTopbarChrome();
+        showView(curView);
+        showToast(tr('Backup imported successfully'));
+      } catch (_) {
+        showToast(tr('Invalid backup JSON file'), 'err');
+      }
+      evt.target.value = '';
+    };
+    reader.readAsText(file);
+  }
+
+  // =========================================================================
+  // Modals: Quick Interval Timer, Custom Combo, Custom Workout, Profile
+  // =========================================================================
+  function openQuickTimerModal() {
+    const m = el('quickTimerModal');
+    if (m) m.classList.add('open');
+  }
+
+  function closeQuickTimerModal() {
+    stopQuickTimer();
+    const m = el('quickTimerModal');
+    if (m) m.classList.remove('open');
+  }
+
+  function applyQuickPreset(work, rest, rounds) {
+    if (el('intRoundDur')) el('intRoundDur').value = String(work);
+    if (el('intRestDur')) el('intRestDur').value = String(rest);
+    if (el('intRoundsCount')) el('intRoundsCount').value = String(rounds);
+  }
+
+  function clearQuickTimerHandles() {
+    if (qtInt) { clearInterval(qtInt); qtInt = null; }
+    if (qtComboTimer) { clearTimeout(qtComboTimer); qtComboTimer = null; }
+  }
+
+  function startQuickTimerFromSettings() {
+    BoxingAudio.ensureAudio();
+    qtWorkSecs = Math.max(10, parseInt((el('intRoundDur') || {}).value, 10) || 180);
+    qtRestSecs = Math.max(5, parseInt((el('intRestDur') || {}).value, 10) || 60);
+    qtTotalRounds = Math.max(1, parseInt((el('intRoundsCount') || {}).value, 10) || 6);
+    qtRound = 1;
+    qtPhase = 'prep';
+    qtRem = 5;
+    qtRunning = true;
+    qtPaused = false;
+
+    if (el('intTimerDisplay')) el('intTimerDisplay').style.display = 'block';
+    if (el('intTimerSettings')) el('intTimerSettings').style.display = 'none';
+    if (el('intPauseBtn')) el('intPauseBtn').textContent = tr('Pause');
+
+    clearQuickTimerHandles();
+    qtInt = setInterval(tickQuickTimer, 1000);
+    syncQuickTimerUI();
+  }
+
+  function tickQuickTimer() {
+    if (!qtRunning || qtPaused) return;
+    if (qtRem > 1) {
+      qtRem -= 1;
+      if (qtRem <= 3) BoxingAudio.playTick();
+      syncQuickTimerUI();
+      return;
+    }
+
+    if (qtPhase === 'prep') {
+      qtPhase = 'work';
+      qtRem = qtWorkSecs;
+      BoxingAudio.playGo();
+      scheduleQuickTimerCombo();
+    } else if (qtPhase === 'work') {
+      if (qtComboTimer) { clearTimeout(qtComboTimer); qtComboTimer = null; }
+      if (qtRound < qtTotalRounds) {
+        qtPhase = 'rest';
+        qtRem = qtRestSecs;
+        BoxingAudio.playBell(1);
+      } else {
+        BoxingAudio.playVictory();
+        BoxingAudio.playBell(3);
+        stopQuickTimer();
+        showToast(tr('Interval timer complete!'));
+        return;
+      }
+    } else {
+      qtRound += 1;
+      qtPhase = 'work';
+      qtRem = qtWorkSecs;
+      BoxingAudio.playGo();
+      scheduleQuickTimerCombo();
+    }
+    syncQuickTimerUI();
+  }
+
+  function scheduleQuickTimerCombo() {
+    const chk = el('intCallCombosChk');
+    if (!qtRunning || qtPaused || qtPhase !== 'work' || !chk || !chk.checked) return;
+    const prof = BoxingStorage.getActiveProfile();
+    const combo = BoxingCombos.generateNextCombo(null, { level: prof.fitnessLevel, style: prof.preferredStyle, customCombos: prof.customCombos });
+    const banner = el('intLiveComboBanner');
+    if (banner && combo) {
+      banner.style.display = 'block';
+      banner.textContent = BoxingCombos.formatComboNotation(combo.punches, prof.calloutStyle, prof.stance);
+      combo.punches.forEach((p, idx) => {
+        setTimeout(() => {
+          if (qtRunning && !qtPaused && qtPhase === 'work') {
+            BoxingAudio.playPunch(p, { stance: prof.stance, calloutStyle: prof.calloutStyle });
+          }
+        }, idx * 450);
+      });
+    }
+    qtComboTimer = setTimeout(scheduleQuickTimerCombo, 3200);
+  }
+
+  function syncQuickTimerUI() {
+    const badge = el('intPhaseBadge');
+    if (badge) {
+      badge.className = `int-phase-badge ${qtPhase === 'work' ? 'int-phase-work' : qtPhase === 'rest' ? 'int-phase-rest' : 'int-phase-prep'}`;
+      badge.textContent = qtPhase === 'work' ? tr('WORK') : qtPhase === 'rest' ? tr('REST') : tr('GET READY');
+    }
+    if (el('intTimeDigits')) el('intTimeDigits').textContent = fmtTime(qtRem);
+    if (el('intRoundsInfo')) el('intRoundsInfo').textContent = `${tr('Round')} ${qtRound} / ${qtTotalRounds}`;
+  }
+
+  function toggleQuickTimerPause() {
+    if (!qtRunning) return;
+    qtPaused = !qtPaused;
+    if (el('intPauseBtn')) el('intPauseBtn').textContent = qtPaused ? tr('Resume') : tr('Pause');
+    if (!qtPaused && qtPhase === 'work') scheduleQuickTimerCombo();
+  }
+
+  function stopQuickTimer() {
+    qtRunning = false;
+    qtPaused = false;
+    clearQuickTimerHandles();
+    if (el('intTimerDisplay')) el('intTimerDisplay').style.display = 'none';
+    if (el('intTimerSettings')) el('intTimerSettings').style.display = 'block';
+    if (el('intLiveComboBanner')) el('intLiveComboBanner').style.display = 'none';
+  }
+
+  // --- Custom Combo Builder ---
+  function openCustomComboModal() {
+    customComboSeq = [];
+    if (el('customComboName')) el('customComboName').value = '';
+    const sel = el('comboPunchSelector');
+    if (sel) {
+      sel.innerHTML = Object.values(BoxingData.PUNCH_DATA).map(p =>
+        `<button type="button" class="pchip ${escHtml(p.chip)}" onclick="appendCustomPunch('${escHtml(p.key)}')">${escHtml(p.num)} · ${escHtml(tr(p.label))}</button>`
+      ).join('');
+    }
+    renderCustomComboSeq();
+    const m = el('comboBuilderModal');
+    if (m) m.classList.add('open');
+  }
+
+  function closeCustomComboModal() {
+    const m = el('comboBuilderModal');
+    if (m) m.classList.remove('open');
+  }
+
+  function appendCustomPunch(key) {
+    if (customComboSeq.length >= 10) {
+      showToast(tr('Maximum 10 actions per combo'), 'warn');
+      return;
+    }
+    customComboSeq.push(key);
+    previewPunchAudio(key);
+    renderCustomComboSeq();
+  }
+
+  function clearCustomComboSeq() {
+    customComboSeq = [];
+    renderCustomComboSeq();
+  }
+
+  function renderCustomComboSeq() {
+    const box = el('customComboSequence');
+    if (!box) return;
+    if (!customComboSeq.length) {
+      box.innerHTML = `<span style="color:var(--text-tertiary);font-size:12px">${escHtml(tr('Tap strikes above to build a sequence'))}</span>`;
+      return;
+    }
+    box.innerHTML = customComboSeq.map(k => {
+      const m = BoxingData.getPunchMeta(k) || { chip: 'chip-jab', num: k, label: k };
+      return `<span class="pchip ${escHtml(m.chip)}">${escHtml(m.num)} · ${escHtml(tr(m.label))}</span>`;
+    }).join('');
+  }
+
+  function testPlayCustomCombo() {
+    if (!customComboSeq.length) {
+      showToast(tr('Add at least 1 strike first'), 'warn');
+      return;
+    }
+    const prof = BoxingStorage.getActiveProfile();
+    BoxingAudio.ensureAudio();
+    customComboSeq.forEach((p, idx) => {
+      setTimeout(() => BoxingAudio.playPunch(p, { stance: prof.stance, calloutStyle: prof.calloutStyle }), idx * 480);
+    });
+  }
+
+  function saveCustomCombo() {
+    if (!customComboSeq.length) {
+      showToast(tr('Add at least 1 strike first'), 'warn');
+      return;
+    }
+    const rawName = (el('customComboName') && el('customComboName').value.trim()) || '';
+    const name = rawName || customComboSeq.map(k => (BoxingData.getPunchMeta(k) || { num: k }).num).join('–');
+    const prof = BoxingStorage.getActiveProfile();
+    const list = [...(prof.customCombos || [])];
+    list.push({
+      id: `custom_c_${Date.now()}`,
+      name,
+      notation: customComboSeq.map(k => (BoxingData.getPunchMeta(k) || { num: k }).num).join('-'),
+      tier: prof.fitnessLevel || 'intermediate',
+      tags: ['custom', prof.preferredStyle || 'fundamentals'],
+      punches: [...customComboSeq],
+      cue: tr('Fighter custom combination')
+    });
+    BoxingStorage.updateActiveProfile({ customCombos: list });
+    closeCustomComboModal();
+    if (curView === 'profile') renderProfileView();
+    showToast(`${tr('Saved')}: ${name}`);
+  }
+
+  // --- Custom Workout Builder ---
+  function openWorkoutBuilderModal() {
+    builderBlocks = [
+      { ...BoxingWorkouts.WORKOUT_DRILL_TEMPLATES[0] },
+      { ...(BoxingWorkouts.WORKOUT_DRILL_TEMPLATES.find(d => d.phase === 'boxing') || BoxingWorkouts.WORKOUT_DRILL_TEMPLATES[1]) }
+    ];
+    if (el('customWorkoutName')) el('customWorkoutName').value = '';
+    const sel = el('drillTemplateSelect');
+    if (sel) {
+      sel.innerHTML = BoxingWorkouts.WORKOUT_DRILL_TEMPLATES.map((d, idx) =>
+        `<option value="${idx}">${escHtml(tr(d.name))} (${fmtTime(d.secs)} × ${d.rounds})</option>`
+      ).join('');
+    }
+    renderBuilderBlocks();
+    const m = el('workoutBuilderModal');
+    if (m) m.classList.add('open');
+  }
+
+  function closeWorkoutBuilderModal() {
+    const m = el('workoutBuilderModal');
+    if (m) m.classList.remove('open');
+  }
+
+  function addDrillBlockToBuilder() {
+    const sel = el('drillTemplateSelect');
+    const idx = parseInt(sel ? sel.value : '0', 10) || 0;
+    const tpl = BoxingWorkouts.WORKOUT_DRILL_TEMPLATES[idx];
+    if (tpl) builderBlocks.push({ ...tpl });
+    renderBuilderBlocks();
+  }
+
+  function removeBuilderBlock(idx) {
+    builderBlocks.splice(idx, 1);
+    renderBuilderBlocks();
+  }
+
+  function updateBuilderBlock(idx, field, val) {
+    if (!builderBlocks[idx]) return;
+    builderBlocks[idx][field] = Math.max(field === 'rounds' ? 1 : 10, parseInt(val, 10) || 60);
+  }
+
+  function renderBuilderBlocks() {
+    const list = el('customWorkoutBlocks');
+    if (!list) return;
+    if (!builderBlocks.length) {
+      list.innerHTML = `<div style="text-align:center;color:var(--text-tertiary);font-size:12px">${escHtml(tr('Add drill blocks above'))}</div>`;
+      return;
+    }
+    list.innerHTML = builderBlocks.map((b, i) => `
+      <div class="builder-block-item">
+        <span><strong>${escHtml(tr(b.name))}</strong></span>
+        <span style="display:flex;align-items:center;gap:6px">
+          <input type="number" class="builder-num" min="1" max="15" value="${b.rounds || 1}" onchange="updateBuilderBlock(${i},'rounds',this.value)"> rds ×
+          <input type="number" class="builder-num" min="10" max="900" step="15" value="${b.secs || 60}" onchange="updateBuilderBlock(${i},'secs',this.value)"> s
+          <button type="button" class="info-btn" onclick="removeBuilderBlock(${i})">✕</button>
+        </span>
+      </div>
+    `).join('');
+  }
+
+  function saveCustomWorkout() {
+    if (!builderBlocks.length) {
+      showToast(tr('Add at least 1 exercise block'), 'warn');
+      return;
+    }
+    const name = (el('customWorkoutName') && el('customWorkoutName').value.trim()) || `Custom Camp ${new Date().toLocaleDateString()}`;
+    const lvl = (el('customWorkoutLevel') && el('customWorkoutLevel').value) || 'intermediate';
+    const prof = BoxingStorage.getActiveProfile();
+    const list = [...(prof.customWorkouts || [])];
+    list.push({
+      id: `custom_wo_${Date.now()}`,
+      category: 'custom',
+      level: lvl,
+      label: name,
+      subtitle: `${builderBlocks.length} ${tr('drills')} · ${tr('Custom session')}`,
+      pill: 'pa',
+      color: '#FF2E2E',
+      exercises: builderBlocks.map(b => ({ ...b }))
+    });
+    BoxingStorage.updateActiveProfile({ customWorkouts: list });
+    closeWorkoutBuilderModal();
+    activeWorkoutCategory = 'custom';
+    showView('workouts');
+    showToast(`${tr('Saved')}: ${name}`);
+  }
+
+  function deleteCustomWorkout(id) {
+    const prof = BoxingStorage.getActiveProfile();
+    const list = (prof.customWorkouts || []).filter(w => w.id !== id);
+    BoxingStorage.updateActiveProfile({ customWorkouts: list });
+    renderWorkoutsView();
+    showToast(tr('Workout deleted'));
+  }
+
+  // --- Profile Modal ---
+  function openProfileModal(mode) {
+    profileModalMode = mode || 'add';
+    const prof = BoxingStorage.getActiveProfile();
+    if (el('profileNameInput')) el('profileNameInput').value = profileModalMode === 'rename' ? prof.name : '';
+    if (el('profileStanceInput')) el('profileStanceInput').value = prof.stance || 'orthodox';
+    const m = el('profileModal');
+    if (m) m.classList.add('open');
+  }
+
+  function closeProfileModal() {
+    const m = el('profileModal');
+    if (m) m.classList.remove('open');
+    updateTopbarChrome();
+  }
+
+  function saveProfileModal() {
+    const name = ((el('profileNameInput') || {}).value || '').trim();
+    const stance = ((el('profileStanceInput') || {}).value || 'orthodox');
+    if (!name) {
+      showToast(tr('Please enter a fighter name'), 'warn');
+      return;
+    }
+    if (profileModalMode === 'rename') {
+      BoxingStorage.renameActiveProfile(name);
+      BoxingStorage.updateActiveProfile({ stance });
+    } else {
+      BoxingStorage.addProfile(name, stance);
+    }
+    closeProfileModal();
+    updateTopbarChrome();
+    showView(curView);
+    showToast(`${tr('Profile')}: ${name}`);
+  }
+
+  // =========================================================================
+  // Keyboard Shortcuts & Initialization
+  // =========================================================================
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    if (e.code === 'Space' && (curView === 'arena' || focusModeActive)) {
+      e.preventDefault();
+      toggleTimer();
+    } else if (e.code === 'Escape') {
+      if (focusModeActive) exitFocusMode();
+      closeQuickTimerModal();
+      closeCustomComboModal();
+      closeWorkoutBuilderModal();
+      closeProfileModal();
+    }
   });
-}
+
+  function initApp() {
+    BoxingStorage.initCloudSync(() => {
+      updateTopbarChrome();
+      showView(curView);
+    });
+
+    if (typeof window.applyTranslations === 'function') {
+      window.applyTranslations();
+    }
+
+    updateTopbarChrome();
+
+    if (window.location.hash === '#trx') {
+      activeWorkoutCategory = 'trx';
+      showView('workouts');
+    } else {
+      showView('home');
+    }
+
+    if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+  }
+
+  // Expose public handlers for HTML inline events
+  Object.assign(window, {
+    showView,
+    openCategoryFromHome,
+    openQuickTimerModal,
+    closeQuickTimerModal,
+    applyQuickPreset,
+    startQuickTimerFromSettings,
+    toggleQuickTimerPause,
+    stopQuickTimer,
+    setSessionDuration,
+    toggleStanceQuick,
+    toggleWakeLock,
+    changeLanguage,
+    handleUserSelect,
+    toggleTodayCompleted,
+    toggleGearFilter,
+    setWorkoutCategory,
+    setWorkoutLevel,
+    selectTrxPhase,
+    startTrxWorkout,
+    launchWorkoutById,
+    toggleInfo,
+    openCustomComboModal,
+    closeCustomComboModal,
+    appendCustomPunch,
+    clearCustomComboSeq,
+    testPlayCustomCombo,
+    saveCustomCombo,
+    deleteCustomCombo,
+    previewComboById,
+    openWorkoutBuilderModal,
+    closeWorkoutBuilderModal,
+    addDrillBlockToBuilder,
+    removeBuilderBlock,
+    updateBuilderBlock,
+    saveCustomWorkout,
+    deleteCustomWorkout,
+    openProfileModal,
+    closeProfileModal,
+    saveProfileModal,
+    skipCornerRest,
+    selectSessionRpe,
+    finishAndReturnCamp,
+    prevEx,
+    toggleTimer,
+    nextEx,
+    jumpToEx,
+    resetCurrentExercise,
+    enterFocusMode,
+    exitFocusMode,
+    toggleReflexMode,
+    toggleCoachDrawer,
+    setAudioMode,
+    toggleCalloutStyle,
+    toggleAutoAdvance,
+    updateSpeed,
+    toggleRestMode,
+    updatePause,
+    updateRestMin,
+    updateRestMax,
+    previewPunchAudio,
+    previewTechAudio,
+    shiftMonth,
+    selectCalendarDay,
+    toggleDayCompleteFromCal,
+    setProfileSubTab,
+    setTechCategory,
+    setComboStyle,
+    setFighterPref,
+    setLevel,
+    toggleUserEquipment,
+    autoAssignDays,
+    saveSchedule,
+    exportDataJSON,
+    importDataJSON
+  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+  } else {
+    initApp();
+  }
+})();

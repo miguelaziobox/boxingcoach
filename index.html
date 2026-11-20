@@ -1,360 +1,707 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Boxing Coach App</title>
-<link rel="stylesheet" href="style.css">
-<link rel="icon" type="image/png" href="images/android/boxing_app_icon.png">
-<link rel="apple-touch-icon" href="images/android/boxing_app_icon.png">
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0D0F12">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Boxing Coach Pro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/png" href="images/android/boxing_app_icon.png">
+  <link rel="apple-touch-icon" href="images/android/boxing_app_icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#050608">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
-<div class="app">
-  <!-- TOP CONTROLS & HEADER -->
-  <div class="app-header">
-    <div class="app-title-wrap">
-      <h1 class="app-title">Boxing Coach</h1>
-      <span class="title-badge">PRO</span>
-    </div>
-    <div class="header-actions">
-      <button class="wake-btn" id="wakeLockBtn" onclick="toggleWakeLock()" title="Keep screen awake during workouts">
-        <span class="wake-dot"></span>
-        <span id="wakeLockText">Screen Awake</span>
-      </button>
-      <button class="quick-timer-btn" onclick="openQuickTimerModal()">
-        ⏱️ <span>Quick Timer</span>
-      </button>
-      <select id="langSelect" class="lang-select" onchange="changeLanguage(this.value)">
-        <option value="en" style="color: black;">🇬🇧 EN</option>
-        <option value="pt-PT" style="color: black;">🇵🇹 PT</option>
-      </select>
-      <select id="userSelect" class="user-select" onchange="handleUserSelect(this.value)">
-      </select>
-    </div>
-  </div>
+<div class="studio-layout">
 
-  <!-- NAVIGATION TABS -->
-  <div class="tab-bar">
-    <button class="tab active" onclick="showView('calendar')">Calendar</button>
-    <button class="tab" onclick="showView('timer')">Workouts</button>
-    <button class="tab" onclick="showView('trx')">TRX Core</button>
-    <button class="tab" onclick="showView('technique')">Technique</button>
-    <button class="tab" onclick="showView('settings')">Stats & Settings</button>
-  </div>
-
-  <!-- 1. CALENDAR VIEW -->
-  <div class="view active" id="view-calendar">
-    <div class="cal-nav">
-      <button class="nbtn" onclick="shiftMonth(-1)">&#9666;</button>
-      <div class="cal-title" id="calTitle"></div>
-      <button class="nbtn" onclick="shiftMonth(1)">&#9656;</button>
-    </div>
-    <div class="stats-row">
-      <div class="sc"><div class="sc-l">Sessions</div><div class="sc-v" id="sSess">–</div></div>
-      <div class="sc"><div class="sc-l">Completed</div><div class="sc-v" id="sDone">–</div></div>
-      <div class="sc"><div class="sc-l">Hours</div><div class="sc-v" id="sHrs">–</div></div>
-      <div class="sc"><div class="sc-l">Streak</div><div class="sc-v" id="sStr">–</div></div>
-    </div>
-    <div class="legend">
-      <div class="li"><div class="ld" style="background:#F09595"></div>Day A – Power</div>
-      <div class="li"><div class="ld" style="background:#85B7EB"></div>Day B – Speed</div>
-      <div class="li"><div class="ld" style="background:#97C459"></div>Day C – Conditioning</div>
-      <div class="li"><div class="ld" style="background:#FAC775"></div>Day D – Ringcraft</div>
-      <div class="li"><div class="ld" style="background:#00C9A7"></div>TRX Session</div>
-      <div class="li"><div class="ld ld-rest"></div>Rest</div>
-    </div>
-    <div class="dh-row" id="dhRow"></div>
-    <div class="cal-grid" id="calGrid"></div>
-    <div id="calDetail" style="display:none"></div>
-
-    <!-- Embedded TRX Quick Link Banner -->
-    <div onclick="showView('trx')" style="cursor:pointer; text-decoration:none; display:block; margin-top:14px;">
-      <div style="
-        display:flex; align-items:center; gap:12px;
-        padding:13px 14px;
-        background: linear-gradient(135deg,rgba(0,201,167,0.15),rgba(74,144,217,0.15));
-        border: 1px solid rgba(0,201,167,0.35);
-        border-radius:14px;
-        backdrop-filter:blur(12px);
-        transition: transform 0.2s;
-      ">
-        <div style="
-          width:40px; height:40px; border-radius:10px; flex-shrink:0;
-          background:linear-gradient(135deg,#00C9A7,#4A90D9);
-          display:flex; align-items:center; justify-content:center; font-size:20px;
-        ">🏋️</div>
-        <div style="flex:1">
-          <div style="font-size:13.5px;font-weight:700;color:#fff">TRX Core & Back Health</div>
-          <div style="font-size:11px;color:rgba(255,255,255,0.7);margin-top:1px">Suspension training for boxing power & injury prevention</div>
-        </div>
-        <div style="font-size:18px; color:var(--trx-accent)">&#9656;</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 2. WORKOUTS & TIMER VIEW -->
-  <div class="view" id="view-timer">
-    <!-- Audio & Mode Bar -->
-    <div class="audio-mode-row">
-      <span style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-tertiary);">Audio Mode</span>
-      <div class="audio-mode-pills">
-        <button id="am-both" class="amp-btn active" onclick="setAudioMode('both')">🔊 Voice + SFX</button>
-        <button id="am-sfx" class="amp-btn" onclick="setAudioMode('sfx')">🥊 SFX Only</button>
-        <button id="am-voice" class="amp-btn" onclick="setAudioMode('voice')">🗣️ Voice Only</button>
-        <button id="am-silent" class="amp-btn" onclick="setAudioMode('silent')">📳 Haptic</button>
-      </div>
-    </div>
-
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
-      <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-tertiary)">Scheduled Workouts</div>
-      <button onclick="openCustomComboModal()" style="font-size:11px; font-weight:600; padding:3px 8px; border-radius:6px; background:rgba(255,255,255,0.08); border:1px solid var(--border-mid); color:var(--gold); cursor:pointer;">+ Create Combo</button>
-    </div>
-    <div class="day-tabs-t" id="dayTabsT"></div>
-
-    <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; margin: 12px 0 8px; color: var(--text-tertiary)">Beginner Heavy Bag</div>
-    <div class="day-tabs-t" id="hbBegTabs"></div>
-
-    <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; margin: 12px 0 8px; color: var(--text-tertiary)">Intermediate Heavy Bag</div>
-    <div class="day-tabs-t" id="hbIntTabs"></div>
-
-    <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; margin: 12px 0 8px; color: var(--text-tertiary)">Advanced Heavy Bag</div>
-    <div class="day-tabs-t" id="hbAdvTabs"></div>
-
-    <div class="prog-bar-wrap">
-      <div class="prog-label"><span>Session progress</span><span id="progPct">0%</span></div>
-      <div class="prog-bar"><div class="prog-fill" id="progFill" style="width:0%"></div></div>
-    </div>
-
-    <div class="timer-card">
-      <div class="tc-top">
-        <div>
-          <div class="tc-sub">Now training</div>
-          <div class="tc-name" id="tcName">Select a day</div>
-        </div>
-        <div class="tc-badge" id="tcBadge"></div>
-      </div>
-      <div class="ring-wrap">
-        <svg width="190" height="190" class="prog-ring">
-          <circle class="ring-bg" cx="95" cy="95" r="78"/>
-          <circle class="ring-fg" id="ringFg" cx="95" cy="95" r="78" stroke="#E24B4A" stroke-dasharray="490.09" stroke-dashoffset="490.09"/>
+  <!-- DESKTOP LEFT SIDEBAR RAIL -->
+  <aside class="sidebar" aria-label="Studio Navigation">
+    <div class="sidebar-brand">
+      <div class="brand-crest" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L4 5.5V11.5C4 16.8 7.4 21.4 12 22.8C16.6 21.4 20 16.8 20 11.5V5.5L12 2Z" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M9 10.5C9 9.1 10.1 8 11.5 8H13.5C14.9 8 16 9.1 16 10.5V12.2C16 13.8 14.7 15 13.1 15H10.5C9.7 15 9 14.3 9 13.5V10.5Z" fill="currentColor"/>
         </svg>
-        <div class="ring-center">
-          <div class="time-big" id="timeBig">0:00</div>
+      </div>
+      <div>
+        <div class="brand-title-row">
+          <span class="app-title" data-i18n="Boxing Coach">Boxing Coach</span>
+          <span class="title-badge" data-i18n="PRO">PRO</span>
+        </div>
+        <div class="brand-sub" data-i18n="Fight Camp System">Fight Camp System</div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <button type="button" class="nav-item active" data-view="home" onclick="showView('home')">
+        <span class="nav-ic">🏠</span>
+        <span data-i18n="Home">Home</span>
+      </button>
+      <button type="button" class="nav-item" data-view="workouts" onclick="showView('workouts')">
+        <span class="nav-ic">🥊</span>
+        <span data-i18n="Workouts">Workouts</span>
+      </button>
+      <button type="button" class="nav-item" data-view="arena" onclick="showView('arena')">
+        <span class="nav-ic">⏱️</span>
+        <span data-i18n="Arena">Arena</span>
+      </button>
+      <button type="button" class="nav-item" data-view="camp" onclick="showView('camp')">
+        <span class="nav-ic">📅</span>
+        <span data-i18n="Camp">Camp</span>
+      </button>
+      <button type="button" class="nav-item" data-view="profile" onclick="showView('profile')">
+        <span class="nav-ic">🎯</span>
+        <span data-i18n="Academy & Profile">Academy &amp; Profile</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-bottom">
+      <button type="button" class="sidebar-timer-btn" onclick="openQuickTimerModal()">
+        <span>⏱️</span>
+        <span data-i18n="Fight Timer">Fight Timer</span>
+      </button>
+      <div class="sidebar-rank-card" id="sidebarRankCard"></div>
+    </div>
+  </aside>
+
+  <!-- MAIN WORKSPACE -->
+  <div class="main-workspace">
+    <!-- SLIM STICKY TOPBAR -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="mobile-brand-dot" aria-hidden="true">🥊</div>
+        <div>
+          <h1 class="topbar-title" id="topbarViewTitle" data-i18n="Home">Home</h1>
+          <div class="topbar-sub" id="headerCampSub">Intermediate • Orthodox</div>
         </div>
       </div>
-      <div class="rnd-info" id="rndInfo"></div>
-      
-      <!-- Combo Callout Box -->
-      <div class="combo-box" id="comboBox" style="display:none">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 5px;">
-          <div class="combo-lbl" id="comboName" style="margin-bottom:0; margin-top:4px;">Combo</div>
-          <div style="display:flex; flex-direction:column; gap:5px; align-items:flex-end;">
-            <div style="display:flex; align-items:center; gap:6px;">
-              <label style="font-size:9px; color:var(--text-tertiary); text-transform:uppercase; min-width:32px; text-align:right;">Speed</label>
-              <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.1" value="1.0" oninput="updateSpeed(this.value)" style="width:60px; accent-color: var(--blue);">
-              <span id="speedVal" style="font-size:10px; color:var(--text-primary); font-weight:600; min-width:26px;">1.0x</span>
+
+      <div class="topbar-actions">
+        <div class="duration-pills topbar-dur" role="group" aria-label="Session Duration">
+          <button type="button" id="topDur-60" class="dur-pill active" onclick="setSessionDuration(60)" data-i18n="1h">1h</button>
+          <button type="button" id="topDur-90" class="dur-pill" onclick="setSessionDuration(90)" data-i18n="1h 30m">1h 30m</button>
+          <button type="button" id="topDur-120" class="dur-pill" onclick="setSessionDuration(120)" data-i18n="2h">2h</button>
+        </div>
+
+        <button type="button" class="pill-toggle stance-btn" id="stanceToggleBtn" onclick="toggleStanceQuick()">
+          <span class="stance-dot"></span>
+          <span id="stanceToggleText">Orthodox</span>
+        </button>
+
+        <button type="button" class="wake-btn" id="wakeLockBtn" onclick="toggleWakeLock()" title="Keep screen awake">
+          <span class="wake-dot"></span>
+          <span id="wakeLockText" data-i18n="Screen Awake">Screen Awake</span>
+        </button>
+
+        <button type="button" class="mobile-timer-icon-btn" onclick="openQuickTimerModal()" title="Quick Fight Timer">⏱️</button>
+
+        <select id="langSelect" class="hdr-select" onchange="changeLanguage(this.value)" aria-label="Language">
+          <option value="en">EN</option>
+          <option value="pt-PT">PT</option>
+        </select>
+
+        <select id="userSelect" class="hdr-select" onchange="handleUserSelect(this.value)" aria-label="Fighter profile"></select>
+      </div>
+    </header>
+
+    <main class="view-stage">
+
+      <!-- 1. STUDIO HOME VIEW -->
+      <section class="view active" id="view-home">
+        <div id="todayCampHero" class="studio-hero"></div>
+        <div id="whoopTelemetryStrip" class="telemetry-rings-grid"></div>
+        <div id="homeCarousels" class="home-carousels"></div>
+      </section>
+
+      <!-- 2. WORKOUT CATALOG, TRX & BUILDERS VIEW -->
+      <section class="view" id="view-workouts">
+        <div class="catalog-top">
+          <div class="catalog-controls-left">
+            <div class="duration-pills" role="group" aria-label="Workout Duration">
+              <button type="button" id="catDur-60" class="dur-pill active" onclick="setSessionDuration(60)" data-i18n="1h">1h</button>
+              <button type="button" id="catDur-90" class="dur-pill" onclick="setSessionDuration(90)" data-i18n="1h 30m">1h 30m</button>
+              <button type="button" id="catDur-120" class="dur-pill" onclick="setSessionDuration(120)" data-i18n="2h">2h</button>
             </div>
-            <div style="display:flex; align-items:center; gap:6px;">
-              <label style="font-size:9px; color:var(--text-tertiary); text-transform:uppercase; min-width:32px; text-align:right;">Rest</label>
-              <div style="display:flex; border-radius:4px; overflow:hidden; border:1px solid rgba(255,255,255,0.15); cursor:pointer; flex-shrink:0;" onclick="toggleRestMode()">
-                <span id="restFixedBtn" style="font-size:8px; padding:2px 6px; background:#F5A623; color:#000; font-weight:700; transition:all 0.2s;">Fixed</span>
-                <span id="restRandomBtn" style="font-size:8px; padding:2px 6px; background:transparent; color:var(--text-tertiary); font-weight:700; transition:all 0.2s;">Random</span>
+            <button type="button" class="mini-pill-btn" id="gearFilterBtn" onclick="toggleGearFilter()">
+              <span id="gearFilterVal" data-i18n="All Gear">All Gear</span>
+            </button>
+          </div>
+          <div class="catalog-actions">
+            <button type="button" class="tech-btn" onclick="openCustomComboModal()" data-i18n="+ Build Combo">+ Build Combo</button>
+            <button type="button" class="tech-btn gold-btn" onclick="openWorkoutBuilderModal()" data-i18n="+ Build Workout">+ Build Workout</button>
+          </div>
+        </div>
+
+        <div class="filter-pills" id="workoutCatTabs"></div>
+        <div class="filter-pills sub-pills" id="workoutLevelTabs"></div>
+
+        <div id="workoutBrowserGrid" class="visual-cards-grid"></div>
+
+        <!-- Integrated 4-Phase TRX Catalog Section (shown when TRX Core filter is active) -->
+        <div id="trxCatalogSection" style="display:none">
+          <div class="trx-disclaimer">
+            <strong data-i18n="Medical Disclaimer">Medical Disclaimer</strong>
+            <span>Consult a physician or physiotherapist if you experience acute lower-back pain, disc herniation, or sciatica. Stop immediately if any movement triggers sharp pain.</span>
+          </div>
+          <div class="trx-level-picker" id="trxPhaseTabs"></div>
+          <div class="trx-summary-bar">
+            <div>
+              <div id="trxLevelTitle" class="trx-level-title">Phase 1</div>
+              <div id="trxLevelDesc" class="trx-level-desc"></div>
+              <div id="trxLevelMeta" class="trx-level-meta"></div>
+            </div>
+            <button type="button" class="stbtn" onclick="startTrxWorkout()" data-i18n="Launch in Timer">Launch in Timer</button>
+          </div>
+          <div id="trxExercisesList"></div>
+        </div>
+      </section>
+
+      <!-- 3. LIVE FIGHT ARENA VIEW -->
+      <section class="view" id="view-arena">
+        <!-- Segmented Session Progress Bar -->
+        <div class="arena-segments-wrap">
+          <div class="arena-segments" id="arenaSegments"></div>
+          <div class="arena-prog-meta">
+            <span id="tcWorkoutTitle">Fight Camp</span>
+            <span id="progPct">0%</span>
+          </div>
+        </div>
+
+        <!-- Ambient Phase-Shifting Stage -->
+        <div class="arena-stage" id="timerCard">
+          <div class="arena-stage-head">
+            <div>
+              <div class="tc-sub" id="arenaRoundBadge">Round 1 of 3</div>
+              <div class="tc-name" id="tcName" data-i18n="Select a workout">Select a workout</div>
+            </div>
+            <div class="tc-badges">
+              <span class="tc-badge" id="tcBadge" data-i18n="Ready">Ready</span>
+            </div>
+          </div>
+
+          <div class="arena-center-grid">
+            <!-- Left: Ring Clock + Live FightCamp Telemetry -->
+            <div class="arena-clock-col">
+              <div class="ring-wrap">
+                <svg width="220" height="220" viewBox="0 0 210 210" class="prog-ring">
+                  <circle class="ring-bg" cx="105" cy="105" r="88"/>
+                  <circle class="ring-fg" id="ringFg" cx="105" cy="105" r="88" stroke="#FF2E2E" stroke-dasharray="552.92" stroke-dashoffset="552.92"/>
+                </svg>
+                <div class="ring-center">
+                  <div class="time-big" id="timeBig">0:00</div>
+                  <div class="ring-round-sub" id="ringRoundSub"></div>
+                </div>
+              </div>
+
+              <div class="rnd-info" id="rndInfo"></div>
+
+              <!-- FightCamp Output Bar -->
+              <div class="arena-telemetry-card" id="arenaTelemetryBar">
+                <div class="at-row">
+                  <span class="at-lbl" id="arenaGoalLbl" data-i18n="Round Punch Target">Round Punch Target</span>
+                  <span class="at-val" id="arenaGoalVal"><strong id="roundPunchCount">0</strong> / <span id="roundPunchGoal">45</span> 🥊</span>
+                </div>
+                <div class="at-bar"><div class="at-bar-fill" id="roundOutputFill" style="width:0%"></div></div>
+                <div class="at-subrow">
+                  <span>⚡ <span data-i18n="Output Pace">Output Pace</span>: <strong id="arenaPpmVal">0</strong> PPM</span>
+                  <span>🔥 <span data-i18n="Burned">Burned</span>: <strong id="arenaKcalVal">0</strong> kcal</span>
+                </div>
               </div>
             </div>
-            <!-- Fixed rest slider -->
-            <div id="restFixedControls" style="display:flex; align-items:center; gap:6px;">
-              <input type="range" id="pauseSlider" min="0.5" max="10" step="0.5" value="3" oninput="updatePause(this.value)" style="width:80px; accent-color: #F5A623;">
-              <span id="pauseVal" style="font-size:10px; color:var(--text-primary); font-weight:600; min-width:26px;">3s</span>
+
+            <!-- Right: Animated Strike & Defense Tactical Silhouette Canvas -->
+            <div class="target-hud-col" id="targetHudWrap" style="display:none">
+              <div class="target-hud-label" data-i18n="Live Strike Target">Live Strike Target</div>
+              <svg id="targetSvgMain" class="target-svg" viewBox="0 0 200 220" aria-label="Boxing Strike Target HUD">
+                <ellipse class="t-base" cx="100" cy="48" rx="28" ry="34"/>
+                <path class="t-base" d="M52 104C52 88 70 84 100 84C130 84 148 88 148 104L142 196C142 204 134 210 124 210H76C66 210 58 204 58 196L52 104Z"/>
+                <circle id="zone-head-l" class="t-zone" cx="80" cy="46" r="13"/>
+                <circle id="zone-head-c" class="t-zone" cx="100" cy="48" r="14"/>
+                <circle id="zone-head-r" class="t-zone" cx="120" cy="46" r="13"/>
+                <rect id="zone-body-l" class="t-zone" x="62" y="128" width="24" height="34" rx="8"/>
+                <rect id="zone-body-c" class="t-zone" x="88" y="122" width="24" height="38" rx="8"/>
+                <rect id="zone-body-r" class="t-zone" x="114" y="128" width="24" height="34" rx="8"/>
+                <path id="zone-def-slip-l" class="t-def" d="M56 46L30 46M30 46L38 38M30 46L38 54"/>
+                <path id="zone-def-slip-r" class="t-def" d="M144 46L170 46M170 46L162 38M170 46L162 54"/>
+                <path id="zone-def-roll" class="t-def" d="M62 66Q100 94 138 66"/>
+                <path id="zone-def-pull" class="t-def" d="M100 18L100 4M100 4L92 12M100 4L108 12"/>
+                <circle id="zone-def-parry" class="t-def" cx="100" cy="48" r="38"/>
+                <circle id="zone-def-feint" class="t-def" cx="100" cy="48" r="22" stroke-dasharray="4 4"/>
+                <path id="zone-def-pivot" class="t-def" d="M64 196A42 18 0 0 1 136 196"/>
+              </svg>
+              <div class="target-zone-readout" id="targetZoneReadout" data-i18n="Ready">Ready</div>
             </div>
-            <!-- Random rest sliders -->
-            <div id="restRandomControls" style="display:none;">
-              <div style="display:flex; align-items:center; gap:4px; margin-bottom:3px;">
-                <label style="font-size:8px; color:var(--text-tertiary); text-transform:uppercase; min-width:22px; text-align:right;">Min</label>
-                <input type="range" id="restMinSlider" min="0.5" max="10" step="0.5" value="1" oninput="updateRestMin(this.value)" style="width:60px; accent-color: #F5A623;">
-                <span id="restMinVal" style="font-size:10px; color:var(--text-primary); font-weight:600; min-width:22px;">1s</span>
+          </div>
+
+          <!-- Combo Callout Strip -->
+          <div class="combo-box" id="comboBox" style="display:none">
+            <div class="combo-head-row">
+              <div>
+                <div class="combo-lbl" id="comboName">Combo</div>
+                <div class="combo-cue" id="comboCue"></div>
               </div>
-              <div style="display:flex; align-items:center; gap:4px;">
-                <label style="font-size:8px; color:var(--text-tertiary); text-transform:uppercase; min-width:22px; text-align:right;">Max</label>
-                <input type="range" id="restMaxSlider" min="0.5" max="10" step="0.5" value="5" oninput="updateRestMax(this.value)" style="width:60px; accent-color: #F5A623;">
-                <span id="restMaxVal" style="font-size:10px; color:var(--text-primary); font-weight:600; min-width:22px;">5s</span>
+            </div>
+            <div class="callout" id="callout"></div>
+            <div class="combo-chips" id="comboChips"></div>
+          </div>
+
+          <!-- Corner Rest Banner -->
+          <div class="corner-rest-banner" id="cornerRestOverlay" style="display:none">
+            <div class="cr-head">
+              <span class="cr-badge" data-i18n="Corner Rest">Corner Rest</span>
+              <span class="cr-next" id="cornerRestNext"></span>
+              <button type="button" class="cr-skip-btn" onclick="skipCornerRest()" data-i18n="Skip Rest">Skip Rest</button>
+            </div>
+            <div class="cr-tip">
+              <strong data-i18n="Corner Tip">Corner Tip</strong>: <span id="cornerTipText"></span>
+            </div>
+            <div class="cr-meta" id="restRoundPunches"></div>
+          </div>
+
+          <!-- Session Complete Card -->
+          <div class="session-complete-card" id="sessionCompleteCard" style="display:none">
+            <div class="sc-done-title" data-i18n="Session complete!">Session complete!</div>
+            <div class="sc-done-sub" data-i18n="Great work, fighter!">Great work, fighter!</div>
+            <div class="sc-done-metrics" id="sessionDoneMetrics"></div>
+            <div class="rpe-wrap">
+              <div class="rpe-label" data-i18n="How did it feel? (RPE)">How did it feel? (RPE)</div>
+              <div class="rpe-pills" id="rpePills">
+                <button type="button" class="rpe-btn" data-rpe="easy" onclick="selectSessionRpe('easy')">🟢 <span data-i18n="Easy">Easy</span></button>
+                <button type="button" class="rpe-btn active" data-rpe="solid" onclick="selectSessionRpe('solid')">🟡 <span data-i18n="Solid">Solid</span></button>
+                <button type="button" class="rpe-btn" data-rpe="war" onclick="selectSessionRpe('war')">🔴 <span data-i18n="War">War</span></button>
               </div>
+            </div>
+            <button type="button" class="save-btn" onclick="finishAndReturnCamp()" data-i18n="Log & Return to Camp">Log &amp; Return to Camp</button>
+          </div>
+
+          <!-- Glove-Friendly Primary & Secondary Control Dock -->
+          <div class="arena-dock">
+            <div class="tc-controls">
+              <button type="button" class="cbtn dock-nav" onclick="prevEx()" aria-label="Previous exercise">&#9666;</button>
+              <button type="button" class="cbtn primary cbtn-main" id="startBtn" onclick="toggleTimer()" data-i18n="Start">Start</button>
+              <button type="button" class="cbtn dock-nav" onclick="nextEx()" aria-label="Next exercise">&#9656;</button>
+              <button type="button" class="cbtn dock-nav" id="resetTimerBtn" onclick="resetCurrentExercise()" title="Reset round">↺</button>
+            </div>
+
+            <div class="dock-secondary">
+              <button type="button" class="mini-pill-btn focus-launch-btn" onclick="enterFocusMode()">
+                ⛶ <span data-i18n="Focus Mode">Focus Mode</span>
+              </button>
+              <button type="button" class="mini-pill-btn" id="reflexModeBtn" onclick="toggleReflexMode()">
+                ⚡ <span data-i18n="Reflex Mode">Reflex Mode</span>: <strong id="reflexModeVal">OFF</strong>
+              </button>
+              <button type="button" class="mini-pill-btn" id="coachDrawerToggle" onclick="toggleCoachDrawer()">
+                ⚙️ <span data-i18n="Coach Controls">Coach Controls</span>
+              </button>
+            </div>
+            <div class="next-up" id="nextUp"></div>
+          </div>
+
+          <!-- Collapsible Coach Controls Drawer -->
+          <div class="coach-drawer" id="coachDrawer" style="display:none">
+            <div class="drawer-grid">
+              <div>
+                <div class="drawer-lbl" data-i18n="Audio Mode">Audio Mode</div>
+                <div class="audio-mode-pills">
+                  <button type="button" id="am-both" class="amp-btn active" onclick="setAudioMode('both')">🔊 <span data-i18n="Voice + SFX">Voice + SFX</span></button>
+                  <button type="button" id="am-sfx" class="amp-btn" onclick="setAudioMode('sfx')">🥊 <span data-i18n="SFX Only">SFX Only</span></button>
+                  <button type="button" id="am-voice" class="amp-btn" onclick="setAudioMode('voice')">🗣️ <span data-i18n="Voice Only">Voice Only</span></button>
+                  <button type="button" id="am-silent" class="amp-btn" onclick="setAudioMode('silent')">📳 <span data-i18n="Haptic">Haptic</span></button>
+                </div>
+              </div>
+
+              <div class="drawer-toggles">
+                <button type="button" class="mini-pill-btn" id="calloutStyleBtn" onclick="toggleCalloutStyle()">
+                  <span data-i18n="Callouts">Callouts</span>: <strong id="calloutStyleVal">Names</strong>
+                </button>
+                <button type="button" class="mini-pill-btn active" id="autoAdvanceBtn" onclick="toggleAutoAdvance()">
+                  <span data-i18n="Auto-Advance">Auto-Advance</span>: <strong id="autoAdvanceVal">ON</strong>
+                </button>
+              </div>
+
+              <div class="combo-sliders">
+                <div class="slider-row">
+                  <label for="speedSlider" data-i18n="Speed">Speed</label>
+                  <input type="range" id="speedSlider" min="0.6" max="1.8" step="0.1" value="1.0" oninput="updateSpeed(this.value)">
+                  <span id="speedVal">1.0x</span>
+                </div>
+                <div class="slider-row">
+                  <label data-i18n="Rest">Rest</label>
+                  <button type="button" class="seg-toggle" onclick="toggleRestMode()">
+                    <span id="restFixedBtn" class="seg-opt active" data-i18n="Fixed">Fixed</span>
+                    <span id="restRandomBtn" class="seg-opt" data-i18n="Random">Random</span>
+                  </button>
+                </div>
+                <div id="restFixedControls" class="slider-row">
+                  <input type="range" id="pauseSlider" min="0.5" max="10" step="0.5" value="3" oninput="updatePause(this.value)">
+                  <span id="pauseVal">3s</span>
+                </div>
+                <div id="restRandomControls" class="slider-random-col" style="display:none">
+                  <div class="slider-row">
+                    <label for="restMinSlider">Min</label>
+                    <input type="range" id="restMinSlider" min="0.5" max="10" step="0.5" value="1" oninput="updateRestMin(this.value)">
+                    <span id="restMinVal">1s</span>
+                  </div>
+                  <div class="slider-row">
+                    <label for="restMaxSlider">Max</label>
+                    <input type="range" id="restMaxSlider" min="0.5" max="10" step="0.5" value="5" oninput="updateRestMax(this.value)">
+                    <span id="restMaxVal">5s</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div id="punchReference" class="punch-ref-wrap" style="display:none">
+              <div class="punch-ref-title" data-i18n="Tap to preview strike audio">Tap to preview strike audio</div>
+              <div id="punchReferenceGrid" class="punch-ref-grid"></div>
             </div>
           </div>
         </div>
-        <div class="combo-chips" id="comboChips"></div>
-        <div class="callout" id="callout"></div>
-      </div>
-      
-      <div id="punchReference" style="display:none; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-light);">
-        <div style="font-size: 10px; text-transform: uppercase; font-weight: 700; color: var(--text-tertiary); margin-bottom: 8px; text-align: left;">Movement Reference</div>
-        <div id="punchReferenceGrid" style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center;"></div>
-      </div>
 
-      <div class="tc-controls">
-        <button class="cbtn" onclick="prevEx()">&#9666;</button>
-        <button class="cbtn primary" id="startBtn" onclick="toggleTimer()">Start</button>
-        <button class="cbtn" onclick="nextEx()">&#9656;</button>
-      </div>
-      <div class="next-up" id="nextUp"></div>
-    </div>
-    <div id="exListT"></div>
-  </div>
+        <!-- Workout Session Timeline -->
+        <div class="timeline-header">
+          <h3 class="section-heading" data-i18n="Workout Timeline">Workout Timeline</h3>
+        </div>
+        <div id="exListT"></div>
+      </section>
 
-  <!-- 3. TRX CORE & BACK VIEW -->
-  <div class="view" id="view-trx">
-    <div class="trx-hero">
-      <div class="trx-hero-icon">🏋️</div>
-      <div>
-        <h2 style="font-family:'Outfit',sans-serif; font-size:17px; font-weight:700; color:#fff;">TRX Suspension Training</h2>
-        <p style="font-size:11.5px; color:var(--text-secondary); margin-top:2px;">Targeted core and back strength for boxing posture and injury prevention.</p>
-      </div>
-    </div>
+      <!-- 4. CAMP CALENDAR & HEATMAP VIEW -->
+      <section class="view" id="view-camp">
+        <div class="stats-row">
+          <div class="sc"><div class="sc-l" data-i18n="Sessions">Sessions</div><div class="sc-v" id="sSess">0/0</div></div>
+          <div class="sc"><div class="sc-l" data-i18n="Hours">Hours</div><div class="sc-v" id="sHrs">0h</div></div>
+          <div class="sc"><div class="sc-l" data-i18n="Streak">Streak</div><div class="sc-v" id="sStr">0</div></div>
+          <div class="sc"><div class="sc-l" data-i18n="Punches">Punches</div><div class="sc-v" id="sPunches">0</div></div>
+        </div>
 
-    <div class="trx-level-picker">
-      <button id="trx-tab-1" class="trx-ltab active" onclick="setTrxLevel(1)">Level 1: Mobility & Back Relief</button>
-      <button id="trx-tab-2" class="trx-ltab" onclick="setTrxLevel(2)">Level 2: Core & Rotation</button>
-      <button id="trx-tab-3" class="trx-ltab" onclick="setTrxLevel(3)">Level 3: Explosive Boxing Power</button>
-    </div>
+        <div class="surface-card">
+          <div class="cal-nav">
+            <button type="button" class="nbtn" onclick="shiftMonth(-1)" aria-label="Previous month">&#9666;</button>
+            <div class="cal-title" id="calTitle"></div>
+            <button type="button" class="nbtn" onclick="shiftMonth(1)" aria-label="Next month">&#9656;</button>
+          </div>
 
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-      <div id="trxLevelTitle" style="font-size:13px; font-weight:700; color:#FFFFFF;">Level 1 Routine</div>
-      <button class="stbtn" onclick="startTrxWorkout()">Start TRX Routine</button>
-    </div>
+          <div class="legend">
+            <div class="li"><div class="ld" style="background:#FF2E2E"></div><span data-i18n="Day A – Power">Day A – Power</span></div>
+            <div class="li"><div class="ld" style="background:#3B82F6"></div><span data-i18n="Day B – Speed">Day B – Speed</span></div>
+            <div class="li"><div class="ld" style="background:#C8FF00"></div><span data-i18n="Day C – Conditioning">Day C – Conditioning</span></div>
+            <div class="li"><div class="ld" style="background:#FFB020"></div><span data-i18n="Day D – Ringcraft">Day D – Ringcraft</span></div>
+            <div class="li"><div class="ld ld-rest"></div><span data-i18n="Rest">Rest</span></div>
+          </div>
 
-    <div id="trxExercisesList"></div>
-  </div>
+          <div class="dh-row" id="dhRow"></div>
+          <div class="cal-grid" id="calGrid"></div>
+        </div>
 
-  <!-- 4. TECHNIQUE LIBRARY VIEW -->
-  <div class="view" id="view-technique">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
-      <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-tertiary)">Boxing Technique & Movements</div>
-      <button class="tech-btn" onclick="openCustomComboModal()">+ Custom Combo</button>
-    </div>
-    <div id="techniqueGrid" class="tech-grid"></div>
-  </div>
+        <div id="calDetail" style="display:none"></div>
 
-  <!-- 5. SETTINGS, STATS & SCHEDULE VIEW -->
-  <div class="view" id="view-settings">
-    <!-- Activity & Badges Block -->
-    <div class="settings-block">
-      <div class="settings-title">Achievements & Badges</div>
-      <div class="settings-hint">Milestones earned through consistent boxing and conditioning.</div>
-      <div class="badges-grid" id="badgesGrid"></div>
-    </div>
+        <!-- 12-Week Activity Heatmap -->
+        <div class="settings-block" style="margin-top:1rem;">
+          <div class="settings-title" data-i18n="Activity Heatmap">Activity Heatmap</div>
+          <div class="telemetry-row" id="settingsTelemetry"></div>
+          <div class="heatmap-wrap">
+            <div class="heatmap-grid" id="heatmapGrid"></div>
+            <div class="heatmap-legend">
+              <span data-i18n="Less">Less</span>
+              <span class="hm-cell lv0"></span>
+              <span class="hm-cell lv1"></span>
+              <span class="hm-cell lv2"></span>
+              <span class="hm-cell lv3"></span>
+              <span class="hm-cell lv4"></span>
+              <span data-i18n="More">More</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
-    <!-- Fitness Level Block -->
-    <div class="settings-block">
-      <div class="settings-title">Fitness Level</div>
-      <div class="settings-hint">Adjusts the intensity, volume, and complexity of your scheduled workouts (Days A–D).</div>
-      <div style="display:flex; gap:8px; margin-top:4px;">
-        <button id="lvl-beginner"    class="cbtn" style="flex:1; font-size:12px;" onclick="setLevel('beginner')">🥊 Beginner</button>
-        <button id="lvl-intermediate" class="cbtn" style="flex:1; font-size:12px;" onclick="setLevel('intermediate')">⚡ Intermediate</button>
-        <button id="lvl-advanced"   class="cbtn" style="flex:1; font-size:12px;" onclick="setLevel('advanced')">🔥 Advanced</button>
-      </div>
-    </div>
+      <!-- 5. ACADEMY, COMBOS, FIGHTER PROFILE & SETTINGS VIEW -->
+      <section class="view" id="view-profile">
+        <div class="subtab-row" id="profileSubTabs">
+          <button type="button" class="subtab active" data-sub="academy" onclick="setProfileSubTab('academy')" data-i18n="Technique Academy">Technique Academy</button>
+          <button type="button" class="subtab" data-sub="combos" onclick="setProfileSubTab('combos')" data-i18n="Combo Playbook">Combo Playbook</button>
+          <button type="button" class="subtab" data-sub="gear" onclick="setProfileSubTab('gear')" data-i18n="Fighter Profile & Gear">Fighter Profile &amp; Gear</button>
+        </div>
 
-    <!-- Program Block -->
-    <div class="settings-block">
-      <div class="settings-title">Long-term Training Plan</div>
-      <div class="settings-hint">Select a structured progressive program.</div>
-      <select id="programSelect" style="width:100%; padding:10px; margin:8px 0; border:1px solid var(--border-mid); border-radius:8px; background:var(--bg-card); color:var(--text-primary); font-size:13px;">
-        <option value="classic" style="color: black;">Classic Weekly Pattern (A/B/C/D)</option>
-        <option value="6m-ba" style="color: black;">6 Months: Beginner to Advanced (24 weeks)</option>
-        <option value="6m-bi" style="color: black;">6 Months: Beginner to Intermediate (24 weeks)</option>
-        <option value="6m-ia" style="color: black;">6 Months: Intermediate to Advanced (24 weeks)</option>
-        <option value="1y-ba" style="color: black;">1 Year: Beginner to Advanced (52 weeks)</option>
-      </select>
-      <label style="font-size:12px; margin-top:8px; display:block; color:var(--text-secondary)">Program Start Date</label>
-      <input type="date" id="programStart" style="width:100%; padding:10px; margin:8px 0; border:1px solid var(--border-mid); border-radius:8px; background:var(--bg-card); color:var(--text-primary); font-size:13px;">
-    </div>
+        <!-- Sub-Pane 1: Technique Academy -->
+        <div id="techAcademyPane">
+          <div class="filter-pills" id="techCatFilters"></div>
+          <div id="techniqueGrid" class="tech-grid"></div>
+        </div>
 
-    <!-- Frequency & Days Block -->
-    <div class="settings-block">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
-        <div class="settings-title" style="margin-bottom:0">Choose training frequency</div>
-        <select id="dpwSelect" onchange="autoAssignDays(this.value)" style="padding:6px; font-size:12px; font-weight:600; border-radius:6px; border:1px solid var(--border-mid); background:var(--bg-secondary); color:var(--text-primary);">
-          <option value="2" style="color: black;">2 Days / Week</option>
-          <option value="3" style="color: black;" selected>3 Days / Week</option>
-          <option value="4" style="color: black;">4 Days / Week</option>
-        </select>
-      </div>
-      <div class="day-assign-grid" id="dayAssignGrid"></div>
-      <div class="week-preview" id="weekPreview"></div>
-      <button class="save-btn" onclick="saveSchedule()">Save schedule</button>
-    </div>
+        <!-- Sub-Pane 2: Combo Playbook -->
+        <div id="comboPlaybookPane" style="display:none">
+          <div class="library-header">
+            <div class="filter-pills" id="comboStyleFilters"></div>
+            <button type="button" class="tech-btn gold-btn" onclick="openCustomComboModal()" data-i18n="+ Build Combo">+ Build Combo</button>
+          </div>
+          <div id="comboPlaybookGrid" class="combo-playbook-grid"></div>
+        </div>
 
-    <!-- Data Backup & Portability -->
-    <div class="settings-block">
-      <div class="settings-title">Data Backup & Sync</div>
-      <div class="settings-hint">Export your workout history and custom combinations to a JSON file or restore a backup.</div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button onclick="exportDataJSON()" class="cbtn" style="flex:1; font-size:12px;">📥 Export Data (JSON)</button>
-        <button onclick="document.getElementById('importFileInp').click()" class="cbtn" style="flex:1; font-size:12px;">📤 Import Data</button>
-        <input type="file" id="importFileInp" accept=".json" style="display:none;" onchange="importDataJSON(event)">
-      </div>
-    </div>
+        <!-- Sub-Pane 3: Fighter Rank, Badges, Home Gym Gear & Camp Schedule -->
+        <div id="fighterProfilePane" style="display:none">
+          <div id="profileRankCard" class="rank-banner-card"></div>
+
+          <div class="settings-block">
+            <div class="settings-title" data-i18n="Achievements & Badges">Achievements &amp; Badges</div>
+            <div class="settings-hint" data-i18n="Milestones earned across your fight camp, streaks, and total punches.">Milestones earned across your fight camp, streaks, and total punches.</div>
+            <div class="badges-grid" id="badgesGrid"></div>
+          </div>
+
+          <div class="settings-block">
+            <div class="settings-title" data-i18n="My Home Gym Gear">My Home Gym Gear</div>
+            <div class="settings-hint" data-i18n="Select the equipment you have available to filter workouts and tailor your camp.">Select the equipment you have available to filter workouts and tailor your camp.</div>
+            <div class="equipment-grid" id="equipmentGrid"></div>
+          </div>
+
+          <div class="settings-block">
+            <div class="settings-title" data-i18n="Fighter Preferences">Fighter Preferences</div>
+            <div class="prefs-grid">
+              <div class="pref-item">
+                <label class="pref-label" data-i18n="Preferred Stance">Preferred Stance</label>
+                <div class="pref-pills">
+                  <button type="button" id="pref-stance-orthodox" class="pref-btn" onclick="setFighterPref('stance','orthodox')" data-i18n="Orthodox">Orthodox</button>
+                  <button type="button" id="pref-stance-southpaw" class="pref-btn" onclick="setFighterPref('stance','southpaw')" data-i18n="Southpaw">Southpaw</button>
+                </div>
+              </div>
+              <div class="pref-item">
+                <label class="pref-label" data-i18n="Callout Format">Callout Format</label>
+                <div class="pref-pills">
+                  <button type="button" id="pref-callout-names" class="pref-btn" onclick="setFighterPref('calloutStyle','names')" data-i18n="Names">Names</button>
+                  <button type="button" id="pref-callout-numbers" class="pref-btn" onclick="setFighterPref('calloutStyle','numbers')" data-i18n="1-2-3 Numbers">1-2-3 Numbers</button>
+                </div>
+              </div>
+              <div class="pref-item">
+                <label class="pref-label" data-i18n="Tactical Focus Style">Tactical Focus Style</label>
+                <select id="prefStyleSelect" class="form-select" onchange="setFighterPref('preferredStyle', this.value)">
+                  <option value="all">Balanced Boxing (All Styles)</option>
+                  <option value="peekaboo">Peek-a-Boo (Slips &amp; Power Hooks)</option>
+                  <option value="philly_shell">Philly Shell (Parry, Pull &amp; Counter)</option>
+                  <option value="cuban">Cuban Matador (Footwork &amp; Angles)</option>
+                  <option value="body_snatcher">Mexican Body Snatcher</option>
+                  <option value="counter">Counter-Puncher</option>
+                </select>
+              </div>
+              <div class="pref-item">
+                <label class="pref-label" data-i18n="Default Inter-Round Rest">Default Inter-Round Rest</label>
+                <select id="prefRestSelect" class="form-select" onchange="setFighterPref('defaultRestSecs', parseInt(this.value,10))">
+                  <option value="30">30s (Sprint Recovery)</option>
+                  <option value="45">45s (Championship)</option>
+                  <option value="60">60s (Standard Boxing)</option>
+                  <option value="90">90s (Extended)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="pref-item" style="margin-top:12px;">
+              <label class="pref-label" data-i18n="Session Duration">Session Duration</label>
+              <div class="pref-pills">
+                <button type="button" id="pref-dur-60" class="pref-btn" onclick="setSessionDuration(60)">⏱️ <span data-i18n="1h">1h</span></button>
+                <button type="button" id="pref-dur-90" class="pref-btn" onclick="setSessionDuration(90)">🔥 <span data-i18n="1h 30m">1h 30m</span></button>
+                <button type="button" id="pref-dur-120" class="pref-btn" onclick="setSessionDuration(120)">🏆 <span data-i18n="2h">2h</span></button>
+              </div>
+            </div>
+
+            <div class="pref-item" style="margin-top:12px;">
+              <label class="pref-label" data-i18n="Fitness Level">Fitness Level</label>
+              <div class="pref-pills">
+                <button type="button" id="lvl-beginner" class="pref-btn" onclick="setLevel('beginner')">🥊 <span data-i18n="Beginner">Beginner</span></button>
+                <button type="button" id="lvl-intermediate" class="pref-btn" onclick="setLevel('intermediate')">⚡ <span data-i18n="Intermediate">Intermediate</span></button>
+                <button type="button" id="lvl-advanced" class="pref-btn" onclick="setLevel('advanced')">🔥 <span data-i18n="Advanced">Advanced</span></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-block">
+            <div class="settings-title" data-i18n="Long-term Training Plan">Long-term Training Plan</div>
+            <select id="programSelect" class="form-select">
+              <option value="classic">Classic Weekly Pattern (A/B/C/D)</option>
+              <option value="6m-ba">6 Months: Beginner to Advanced (24 weeks)</option>
+              <option value="6m-bi">6 Months: Beginner to Intermediate (24 weeks)</option>
+              <option value="6m-ia">6 Months: Intermediate to Advanced (24 weeks)</option>
+              <option value="1y-ba">1 Year: Beginner to Advanced (52 weeks)</option>
+            </select>
+            <label class="pref-label" style="margin-top:10px;display:block;" data-i18n="Program Start Date">Program Start Date</label>
+            <input type="date" id="programStart" class="form-input">
+
+            <div class="sched-freq-row">
+              <span class="settings-title" style="margin:0;" data-i18n="Choose training frequency">Choose training frequency</span>
+              <select id="dpwSelect" class="form-select compact-select" onchange="autoAssignDays(this.value)">
+                <option value="2">2 Days / Week</option>
+                <option value="3">3 Days / Week</option>
+                <option value="4">4 Days / Week</option>
+                <option value="5">5 Days / Week</option>
+              </select>
+            </div>
+            <div class="day-assign-grid" id="dayAssignGrid"></div>
+            <div class="week-preview" id="weekPreview"></div>
+            <button type="button" class="save-btn" onclick="saveSchedule()" data-i18n="Save schedule">Save schedule</button>
+          </div>
+
+          <div class="settings-block">
+            <div class="settings-title" data-i18n="Data Backup & Sync">Data Backup &amp; Sync</div>
+            <div class="settings-hint" data-i18n="Export your full profile, workout logs, custom combos & schedule as JSON.">Export your full profile, workout logs, custom combos &amp; schedule as JSON.</div>
+            <div class="backup-actions">
+              <button type="button" onclick="exportDataJSON()" class="cbtn" data-i18n="Export Data (JSON)">📥 Export Data (JSON)</button>
+              <button type="button" onclick="document.getElementById('importFileInp').click()" class="cbtn" data-i18n="Import Data">📤 Import Data</button>
+              <input type="file" id="importFileInp" accept=".json" style="display:none;" onchange="importDataJSON(event)">
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
   </div>
 </div>
 
-<!-- QUICK INTERVAL TIMER MODAL -->
-<div id="quickTimerModal" class="modal-overlay">
-  <div class="modal-content">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-      <h3 style="font-family:'Outfit',sans-serif; font-size:18px; margin:0;">Boxing Interval Timer</h3>
-      <button onclick="closeQuickTimerModal()" style="background:none; border:none; color:var(--text-tertiary); font-size:20px; cursor:pointer;">&times;</button>
+<!-- MOBILE VIEWPORT-PINNED BOTTOM NAVIGATION (OUTSIDE BACKDROP CONTAINERS) -->
+<nav class="mobile-bottom-nav" aria-label="Mobile Navigation">
+  <button type="button" class="mnav-item active" data-view="home" onclick="showView('home')">
+    <span class="mnav-ic">🏠</span>
+    <span data-i18n="Home">Home</span>
+  </button>
+  <button type="button" class="mnav-item" data-view="workouts" onclick="showView('workouts')">
+    <span class="mnav-ic">🥊</span>
+    <span data-i18n="Workouts">Workouts</span>
+  </button>
+  <button type="button" class="mnav-item" data-view="arena" onclick="showView('arena')">
+    <span class="mnav-ic">⏱️</span>
+    <span data-i18n="Arena">Arena</span>
+  </button>
+  <button type="button" class="mnav-item" data-view="camp" onclick="showView('camp')">
+    <span class="mnav-ic">📅</span>
+    <span data-i18n="Camp">Camp</span>
+  </button>
+  <button type="button" class="mnav-item" data-view="profile" onclick="showView('profile')">
+    <span class="mnav-ic">🎯</span>
+    <span data-i18n="Profile">Profile</span>
+  </button>
+</nav>
+
+<!-- FULL-SCREEN CORNERMAN FOCUS MODE OVERLAY -->
+<div id="focusModeOverlay" class="focus-overlay" aria-hidden="true">
+  <div class="fm-topbar">
+    <div>
+      <div class="fm-phase" id="fmPhase">BOXING</div>
+      <div class="fm-ex-name" id="fmExName">Heavy Bag Round</div>
+    </div>
+    <div class="fm-top-right">
+      <div class="fm-round-badge" id="fmRoundBadge">Round 1 of 3</div>
+      <div class="fm-punch-badge" id="fmPunchBadge">🥊 0</div>
+      <button type="button" class="fm-exit-btn" onclick="exitFocusMode()" data-i18n="Exit Focus">✕ Exit Focus</button>
+    </div>
+  </div>
+
+  <div class="fm-center-grid">
+    <div class="fm-clock-col">
+      <div class="fm-digits" id="fmTimeDigits">3:00</div>
+      <div class="fm-combo-name" id="fmComboName"></div>
+      <div class="fm-combo-chips" id="fmComboChips"></div>
+      <div class="fm-callout" id="fmCallout"></div>
+      <div class="fm-rest-banner" id="fmRestBanner" style="display:none">
+        <strong data-i18n="Corner Tip">Corner Tip</strong>: <span id="fmRestTip"></span>
+      </div>
     </div>
 
-    <!-- Interval HUD Display -->
+    <div class="fm-hud-col" id="fmTargetHudWrap">
+      <svg id="targetSvgFocus" class="target-svg fm-target-svg" viewBox="0 0 200 220" aria-label="Focus Strike HUD">
+        <ellipse class="t-base" cx="100" cy="48" rx="28" ry="34"/>
+        <path class="t-base" d="M52 104C52 88 70 84 100 84C130 84 148 88 148 104L142 196C142 204 134 210 124 210H76C66 210 58 204 58 196L52 104Z"/>
+        <circle id="fm-zone-head-l" class="t-zone" cx="80" cy="46" r="13"/>
+        <circle id="fm-zone-head-c" class="t-zone" cx="100" cy="48" r="14"/>
+        <circle id="fm-zone-head-r" class="t-zone" cx="120" cy="46" r="13"/>
+        <rect id="fm-zone-body-l" class="t-zone" x="62" y="128" width="24" height="34" rx="8"/>
+        <rect id="fm-zone-body-c" class="t-zone" x="88" y="122" width="24" height="38" rx="8"/>
+        <rect id="fm-zone-body-r" class="t-zone" x="114" y="128" width="24" height="34" rx="8"/>
+        <path id="fm-zone-def-slip-l" class="t-def" d="M56 46L30 46M30 46L38 38M30 46L38 54"/>
+        <path id="fm-zone-def-slip-r" class="t-def" d="M144 46L170 46M170 46L162 38M170 46L162 54"/>
+        <path id="fm-zone-def-roll" class="t-def" d="M62 66Q100 94 138 66"/>
+        <path id="fm-zone-def-pull" class="t-def" d="M100 18L100 4M100 4L92 12M100 4L108 12"/>
+        <circle id="fm-zone-def-parry" class="t-def" cx="100" cy="48" r="38"/>
+        <circle id="fm-zone-def-feint" class="t-def" cx="100" cy="48" r="22" stroke-dasharray="4 4"/>
+        <path id="fm-zone-def-pivot" class="t-def" d="M64 196A42 18 0 0 1 136 196"/>
+      </svg>
+    </div>
+  </div>
+
+  <div class="fm-controls">
+    <button type="button" class="fm-btn" onclick="prevEx()">&#9666; Prev</button>
+    <button type="button" class="fm-btn fm-btn-primary" id="fmStartBtn" onclick="toggleTimer()">Pause</button>
+    <button type="button" class="fm-btn" onclick="nextEx()">Next &#9656;</button>
+  </div>
+</div>
+
+<!-- QUICK FIGHT TIMER MODAL -->
+<div id="quickTimerModal" class="modal-overlay">
+  <div class="modal-content">
+    <div class="modal-head">
+      <h3 data-i18n="Boxing Interval Timer">Boxing Interval Timer</h3>
+      <button type="button" class="modal-close" onclick="closeQuickTimerModal()" aria-label="Close">&times;</button>
+    </div>
+
     <div class="int-timer-hud" id="intTimerDisplay" style="display:none;">
       <div id="intPhaseBadge" class="int-phase-badge int-phase-work">WORK</div>
       <div class="int-time-digits" id="intTimeDigits">3:00</div>
       <div class="int-rounds-info" id="intRoundsInfo">Round 1 of 6</div>
-      <div style="display:flex; gap:10px; justify-content:center;">
-        <button class="cbtn primary" id="intPauseBtn" onclick="toggleQuickTimerPause()">Pause</button>
-        <button class="cbtn" onclick="stopQuickTimer()">Stop</button>
+      <div id="intLiveComboBanner" class="int-live-combo" style="display:none;"></div>
+      <div class="modal-btn-row">
+        <button type="button" class="cbtn primary" id="intPauseBtn" onclick="toggleQuickTimerPause()" data-i18n="Pause">Pause</button>
+        <button type="button" class="cbtn" onclick="stopQuickTimer()" data-i18n="Stop">Stop</button>
       </div>
     </div>
 
-    <!-- Interval Settings Form -->
     <div id="intTimerSettings">
-      <div style="margin-bottom:12px;">
-        <label style="font-size:12px; color:var(--text-secondary); display:block; margin-bottom:4px;">Round Duration</label>
-        <select id="intRoundDur" style="width:100%; padding:8px; border-radius:6px; background:var(--bg-secondary); color:#fff; border:1px solid var(--border-mid);">
-          <option value="60" style="color: black;">1:00 min (Sprint)</option>
-          <option value="120" style="color: black;">2:00 min (Standard Speed)</option>
-          <option value="180" style="color: black;" selected>3:00 min (Championship Round)</option>
-          <option value="300" style="color: black;">5:00 min (MMA / Heavy Endurance)</option>
-          <option value="20" style="color: black;">20s (Tabata Sprint)</option>
+      <div class="preset-chips">
+        <button type="button" class="preset-chip" onclick="applyQuickPreset(180,60,6)" data-i18n="Pro Boxing (3:00 / 1:00)">Pro Boxing (3:00 / 1:00)</button>
+        <button type="button" class="preset-chip" onclick="applyQuickPreset(120,60,4)" data-i18n="Amateur (2:00 / 1:00)">Amateur (2:00 / 1:00)</button>
+        <button type="button" class="preset-chip" onclick="applyQuickPreset(300,60,5)" data-i18n="MMA / Endurance (5:00 / 1:00)">MMA / Endurance (5:00 / 1:00)</button>
+        <button type="button" class="preset-chip" onclick="applyQuickPreset(20,10,8)" data-i18n="Tabata Sprint (0:20 / 0:10)">Tabata Sprint (0:20 / 0:10)</button>
+        <button type="button" class="preset-chip" onclick="applyQuickPreset(180,30,6)" data-i18n="Shadow Flow (3:00 / 0:30)">Shadow Flow (3:00 / 0:30)</button>
+      </div>
+
+      <div class="form-field">
+        <label data-i18n="Round Duration">Round Duration</label>
+        <select id="intRoundDur" class="form-select">
+          <option value="20">0:20 (Tabata Sprint)</option>
+          <option value="60">1:00 min (Speed Sprint)</option>
+          <option value="120">2:00 min (Amateur Round)</option>
+          <option value="180" selected>3:00 min (Championship Round)</option>
+          <option value="300">5:00 min (MMA / Endurance)</option>
         </select>
       </div>
 
-      <div style="margin-bottom:12px;">
-        <label style="font-size:12px; color:var(--text-secondary); display:block; margin-bottom:4px;">Rest Duration</label>
-        <select id="intRestDur" style="width:100%; padding:8px; border-radius:6px; background:var(--bg-secondary); color:#fff; border:1px solid var(--border-mid);">
-          <option value="10" style="color: black;">10s (Tabata Rest)</option>
-          <option value="30" style="color: black;">30s (Short Rest)</option>
-          <option value="60" style="color: black;" selected>60s (Standard Round Rest)</option>
-          <option value="90" style="color: black;">90s (Recovery)</option>
+      <div class="form-field">
+        <label data-i18n="Rest Duration">Rest Duration</label>
+        <select id="intRestDur" class="form-select">
+          <option value="10">10s (Tabata Rest)</option>
+          <option value="30">30s (Short Rest)</option>
+          <option value="45">45s (Pro Pace)</option>
+          <option value="60" selected>60s (Standard Corner Rest)</option>
+          <option value="90">90s (Full Recovery)</option>
         </select>
       </div>
 
-      <div style="margin-bottom:16px;">
-        <label style="font-size:12px; color:var(--text-secondary); display:block; margin-bottom:4px;">Total Rounds</label>
-        <select id="intRoundsCount" style="width:100%; padding:8px; border-radius:6px; background:var(--bg-secondary); color:#fff; border:1px solid var(--border-mid);">
-          <option value="3" style="color: black;">3 Rounds</option>
-          <option value="4" style="color: black;">4 Rounds</option>
-          <option value="6" style="color: black;" selected>6 Rounds</option>
-          <option value="8" style="color: black;">8 Rounds (Tabata / Pro)</option>
-          <option value="10" style="color: black;">10 Rounds</option>
-          <option value="12" style="color: black;">12 Rounds (Title Fight)</option>
+      <div class="form-field">
+        <label data-i18n="Total Rounds">Total Rounds</label>
+        <select id="intRoundsCount" class="form-select">
+          <option value="3">3 Rounds</option>
+          <option value="4">4 Rounds</option>
+          <option value="6" selected>6 Rounds</option>
+          <option value="8">8 Rounds (Tabata / Camp)</option>
+          <option value="10">10 Rounds</option>
+          <option value="12">12 Rounds (Title Fight)</option>
         </select>
       </div>
 
-      <button class="save-btn" onclick="startQuickTimerFromSettings()">Start Interval Timer</button>
+      <label class="checkbox-row">
+        <input type="checkbox" id="intCallCombosChk">
+        <span data-i18n="Call Live Combos">Call Live Combos</span>
+      </label>
+
+      <button type="button" class="save-btn" onclick="startQuickTimerFromSettings()" data-i18n="Start Interval Timer">Start Interval Timer</button>
     </div>
   </div>
 </div>
@@ -362,45 +709,90 @@
 <!-- CUSTOM COMBO BUILDER MODAL -->
 <div id="comboBuilderModal" class="modal-overlay">
   <div class="modal-content">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-      <h3 style="font-family:'Outfit',sans-serif; font-size:18px; margin:0;">Create Custom Combo</h3>
-      <button onclick="closeCustomComboModal()" style="background:none; border:none; color:var(--text-tertiary); font-size:20px; cursor:pointer;">&times;</button>
+    <div class="modal-head">
+      <h3 data-i18n="Create Custom Combo">Create Custom Combo</h3>
+      <button type="button" class="modal-close" onclick="closeCustomComboModal()" aria-label="Close">&times;</button>
     </div>
 
-    <input type="text" id="customComboName" placeholder="Combo Name (e.g. Iron Mike 1-2-3)" style="width:100%; box-sizing:border-box; padding:10px; margin-bottom:12px; border-radius:8px; border:1px solid var(--border-mid); background:var(--bg-card); color:white; font-size:14px;">
+    <input type="text" id="customComboName" class="form-input" placeholder="Combo Name (e.g. Tyson 6-3-2)" maxlength="40">
 
-    <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-tertiary); margin-bottom:6px;">Tap punches to assemble sequence:</div>
-    <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;" id="comboPunchSelector">
-      <!-- Punch buttons generated by JS -->
+    <div class="builder-lbl">Tap punches &amp; defenses to assemble sequence (max 10):</div>
+    <div class="combo-punch-selector" id="comboPunchSelector"></div>
+
+    <div class="builder-lbl">Current Sequence:</div>
+    <div id="customComboSequence" class="custom-seq-box"></div>
+
+    <div class="modal-btn-row">
+      <button type="button" onclick="clearCustomComboSeq()" class="cbtn">Clear</button>
+      <button type="button" onclick="testPlayCustomCombo()" class="cbtn">▶ Test Audio</button>
+      <button type="button" onclick="saveCustomCombo()" class="cbtn primary" data-i18n="Save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- CUSTOM WORKOUT BUILDER MODAL -->
+<div id="workoutBuilderModal" class="modal-overlay">
+  <div class="modal-content modal-wide">
+    <div class="modal-head">
+      <h3 data-i18n="Create Custom Workout">Create Custom Workout</h3>
+      <button type="button" class="modal-close" onclick="closeWorkoutBuilderModal()" aria-label="Close">&times;</button>
     </div>
 
-    <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-tertiary); margin-bottom:6px;">Current Sequence:</div>
-    <div id="customComboSequence" style="min-height:36px; padding:8px; background:rgba(0,0,0,0.4); border-radius:8px; border:1px dashed var(--border-mid); display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:14px;">
-      <span style="font-size:12px; color:var(--text-tertiary);">No punches added yet</span>
+    <div class="builder-top-grid">
+      <input type="text" id="customWorkoutName" class="form-input" placeholder="Workout Name (e.g. Home Gym Power 45)" maxlength="45">
+      <select id="customWorkoutLevel" class="form-select">
+        <option value="beginner">Beginner</option>
+        <option value="intermediate" selected>Intermediate</option>
+        <option value="advanced">Advanced</option>
+      </select>
     </div>
 
-    <div style="display:flex; gap:10px;">
-      <button onclick="clearCustomComboSeq()" class="cbtn" style="flex:1;">Clear</button>
-      <button onclick="testPlayCustomCombo()" class="cbtn" style="flex:1;">▶ Test Audio</button>
-      <button onclick="saveCustomCombo()" class="cbtn primary" style="flex:1;">Save</button>
+    <div class="builder-lbl" data-i18n="Add Exercise Block">Add Exercise Block</div>
+    <div class="builder-add-row">
+      <select id="drillTemplateSelect" class="form-select"></select>
+      <button type="button" class="tech-btn gold-btn" onclick="addDrillBlockToBuilder()">+ Add</button>
+    </div>
+
+    <div id="customWorkoutBlocks" class="builder-blocks-list"></div>
+
+    <div class="modal-btn-row" style="margin-top:14px;">
+      <button type="button" class="cbtn" onclick="closeWorkoutBuilderModal()" data-i18n="Cancel">Cancel</button>
+      <button type="button" class="cbtn primary" onclick="saveCustomWorkout()" data-i18n="Save Workout">Save Workout</button>
     </div>
   </div>
 </div>
 
 <!-- USER PROFILE MODAL -->
 <div id="profileModal" class="modal-overlay">
-  <div class="modal-content" style="max-width:320px; text-align:center;">
-    <h3 style="margin-top:0; font-family:'Outfit',sans-serif;">Enter Profile Name</h3>
-    <input type="text" id="profileNameInput" placeholder="Fighter Name..." maxlength="15" style="width:100%; box-sizing:border-box; padding:10px; margin:15px 0; border-radius:8px; border:1px solid var(--border-mid); background:#111; color:white; font-size:16px;">
-    <div style="display:flex; justify-content:space-between; gap:10px;">
-      <button onclick="closeProfileModal()" class="cbtn" style="flex:1;">Cancel</button>
-      <button onclick="saveProfileModal()" class="cbtn primary" style="flex:1;">Save</button>
+  <div class="modal-content modal-narrow">
+    <div class="modal-head">
+      <h3 data-i18n="Enter Profile Name">Enter Profile Name</h3>
+      <button type="button" class="modal-close" onclick="closeProfileModal()" aria-label="Close">&times;</button>
+    </div>
+    <input type="text" id="profileNameInput" class="form-input" placeholder="Fighter Name..." data-i18n-placeholder="Fighter Name..." maxlength="20">
+    <div class="form-field">
+      <label data-i18n="Preferred Stance">Preferred Stance</label>
+      <select id="profileStanceInput" class="form-select">
+        <option value="orthodox">Orthodox (Left Lead)</option>
+        <option value="southpaw">Southpaw (Right Lead)</option>
+      </select>
+    </div>
+    <div class="modal-btn-row">
+      <button type="button" onclick="closeProfileModal()" class="cbtn" data-i18n="Cancel">Cancel</button>
+      <button type="button" onclick="saveProfileModal()" class="cbtn primary" data-i18n="Save">Save</button>
     </div>
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- TOAST NOTIFICATION CONTAINER -->
+<div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
 <script src="translations.js"></script>
-<script src="app.js?v=20"></script>
+<script src="js/storage.js"></script>
+<script src="js/data-boxing.js"></script>
+<script src="js/data-combos.js"></script>
+<script src="js/data-workouts.js"></script>
+<script src="js/audio-engine.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
